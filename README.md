@@ -4,27 +4,26 @@ Token-efficient CLI for the [Hubstaff Public API v2](https://developer.hubstaff.
 
 ## Installation
 
-Download the latest binary from [Releases](https://github.com/chocksy/hubstaff-cli/releases):
+**One-liner** (macOS / Linux — auto-detects your platform):
 
 ```bash
-# macOS (Apple Silicon)
-curl -L https://github.com/chocksy/hubstaff-cli/releases/latest/download/hubstaff-cli-aarch64-apple-darwin.tar.gz | tar xz
-mv hubstaff-cli /usr/local/bin/
-
-# macOS (Intel)
-curl -L https://github.com/chocksy/hubstaff-cli/releases/latest/download/hubstaff-cli-x86_64-apple-darwin.tar.gz | tar xz
-mv hubstaff-cli /usr/local/bin/
-
-# Linux (x86_64)
-curl -L https://github.com/chocksy/hubstaff-cli/releases/latest/download/hubstaff-cli-x86_64-unknown-linux-musl.tar.gz | tar xz
-mv hubstaff-cli /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/chocksy/hubstaff-cli/master/install.sh | sh
 ```
 
-Or build from source:
+**Homebrew** (macOS / Linux):
+
+```bash
+brew tap chocksy/tap
+brew install hubstaff-cli
+```
+
+**Cargo** (build from source):
 
 ```bash
 cargo install --git https://github.com/chocksy/hubstaff-cli
 ```
+
+Or download binaries directly from [Releases](https://github.com/chocksy/hubstaff-cli/releases).
 
 ## Authentication
 
