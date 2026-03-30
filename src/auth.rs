@@ -6,22 +6,33 @@ use rand::Rng;
 use sha2::{Digest, Sha256};
 use url::Url;
 
-const CLIENT_ID: &str = "REDACTED_CLIENT_ID";
-const CLIENT_SECRET: &str = "REDACTED_CLIENT_SECRET";
 const PORT_START: u16 = 19876;
 const PORT_END: u16 = 19886;
 const CALLBACK_TIMEOUT_SECS: u64 = 120;
 
+fn client_id() -> Result<String, CliError> {
+    std::env::var("HUBSTAFF_CLIENT_ID")
+        .map_err(|_| CliError::Config("HUBSTAFF_CLIENT_ID not set. Add it to .env or export it.".into()))
+}
+
+fn client_secret() -> Result<String, CliError> {
+    std::env::var("HUBSTAFF_CLIENT_SECRET")
+        .map_err(|_| CliError::Config("HUBSTAFF_CLIENT_SECRET not set. Add it to .env or export it.".into()))
+}
+
 pub fn login() -> Result<(), CliError> {
     let config = Config::load()?;
     let auth_base = &config.auth_url;
+
+    let id = client_id()?;
+    let secret = client_secret()?;
 
     let (verifier, challenge) = generate_pkce();
     let state = generate_state();
     let (server, port) = start_callback_server()?;
     let redirect_uri = format!("http://localhost:{port}/callback");
 
-    let auth_url = build_auth_url(auth_base, &challenge, &redirect_uri, &state);
+    let auth_url = build_auth_url(auth_base, &id, &challenge, &redirect_uri, &state);
 
     println!("Opening browser for authentication...");
     println!("If the browser doesn't open, visit:\n{auth_url}");
@@ -31,7 +42,7 @@ pub fn login() -> Result<(), CliError> {
     }
 
     let code = wait_for_callback(server, &state)?;
-    let tokens = exchange_code(auth_base, &code, &verifier, &redirect_uri)?;
+    let tokens = exchange_code(auth_base, &id, &secret, &code, &verifier, &redirect_uri)?;
 
     let mut config = Config::load()?;
     config.auth.access_token = Some(tokens.access_token);
@@ -55,6 +66,8 @@ pub fn logout() -> Result<(), CliError> {
 
 pub fn refresh_token(config: &mut Config) -> Result<(), CliError> {
     let auth_base = config.auth_url.clone();
+    let id = client_id()?;
+    let secret = client_secret()?;
     let refresh = config
         .auth
         .refresh_token
@@ -65,7 +78,7 @@ pub fn refresh_token(config: &mut Config) -> Result<(), CliError> {
     let client = reqwest::blocking::Client::new();
     let resp = client
         .post(format!("{auth_base}/access_tokens"))
-        .basic_auth(CLIENT_ID, Some(CLIENT_SECRET))
+        .basic_auth(&id, Some(&secret))
         .form(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", &refresh),
@@ -133,12 +146,12 @@ fn generate_nonce() -> String {
     URL_SAFE_NO_PAD.encode(&nonce_bytes)
 }
 
-fn build_auth_url(auth_base: &str, challenge: &str, redirect_uri: &str, state: &str) -> String {
+fn build_auth_url(auth_base: &str, client_id: &str, challenge: &str, redirect_uri: &str, state: &str) -> String {
     let nonce = generate_nonce();
     let mut url = Url::parse(&format!("{auth_base}/authorizations/new")).unwrap();
     url.query_pairs_mut()
         .append_pair("response_type", "code")
-        .append_pair("client_id", CLIENT_ID)
+        .append_pair("client_id", client_id)
         .append_pair("redirect_uri", redirect_uri)
         .append_pair("scope", "openid hubstaff:read hubstaff:write")
         .append_pair("code_challenge", challenge)
@@ -246,6 +259,8 @@ fn wait_for_callback(server: tiny_http::Server, expected_state: &str) -> Result<
 
 fn exchange_code(
     auth_base: &str,
+    client_id: &str,
+    client_secret: &str,
     code: &str,
     verifier: &str,
     redirect_uri: &str,
@@ -253,7 +268,7 @@ fn exchange_code(
     let client = reqwest::blocking::Client::new();
     let resp = client
         .post(format!("{auth_base}/access_tokens"))
-        .basic_auth(CLIENT_ID, Some(CLIENT_SECRET))
+        .basic_auth(client_id, Some(client_secret))
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -373,12 +388,13 @@ mod tests {
     fn auth_url_contains_required_params() {
         let url = build_auth_url(
             "https://account.hubstaff.com",
+            "test_client_id",
             "test_challenge",
             "http://localhost:19876/callback",
             "test_state",
         );
         assert!(url.contains("response_type=code"));
-        assert!(url.contains(&format!("client_id={CLIENT_ID}")));
+        assert!(url.contains("client_id=test_client_id"));
         assert!(url.contains("redirect_uri="));
         assert!(url.contains("scope="));
         assert!(url.contains("code_challenge=test_challenge"));
@@ -391,6 +407,7 @@ mod tests {
     fn auth_url_uses_custom_base() {
         let url = build_auth_url(
             "https://account.staging.hbstf.co",
+            "test_id",
             "ch",
             "http://localhost:19876/callback",
             "st",

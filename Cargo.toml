@@ -24,6 +24,7 @@ base64 = "0.22"
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 url = "2"
+dotenvy = "0.15"
 
 [dev-dependencies]
 mockito = "1"

@@ -313,6 +313,9 @@ enum TimeEntriesAction {
 }
 
 fn main() {
+    // Load .env file if present (silently ignore if missing)
+    let _ = dotenvy::dotenv();
+
     let cli = Cli::parse();
 
     let result = run(&cli);
