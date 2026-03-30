@@ -1,0 +1,2 @@
+# Historical commit where CLIENT_SECRET was replaced with REDACTED_CLIENT_SECRET by git-filter-repo
+52da220e93194cac8dedc39366d0f4d970139153:src/auth.rs:generic-client-secret:10
