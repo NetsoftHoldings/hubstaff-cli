@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="chocksy/hubstaff-cli"
+REPO="NetsoftHoldings/hubstaff-cli"
 INSTALL_DIR="/usr/local/bin"
 BINARY="hubstaff-cli"
 

@@ -7,23 +7,16 @@ Token-efficient CLI for the [Hubstaff Public API v2](https://developer.hubstaff.
 **One-liner** (macOS / Linux — auto-detects your platform):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chocksy/hubstaff-cli/master/install.sh | sh
-```
-
-**Homebrew** (macOS / Linux):
-
-```bash
-brew tap chocksy/tap
-brew install hubstaff-cli
+curl -fsSL https://raw.githubusercontent.com/NetsoftHoldings/hubstaff-cli/master/install.sh | sh
 ```
 
 **Cargo** (build from source):
 
 ```bash
-cargo install --git https://github.com/chocksy/hubstaff-cli
+cargo install --git https://github.com/NetsoftHoldings/hubstaff-cli
 ```
 
-Or download binaries directly from [Releases](https://github.com/chocksy/hubstaff-cli/releases).
+Or download binaries directly from [Releases](https://github.com/NetsoftHoldings/hubstaff-cli/releases).
 
 ## Authentication
 
@@ -249,9 +242,9 @@ All commands support these flags:
 
 ```
 USER_ID  NAME            EMAIL               ROLE   STATUS
-130      Anatolie Stafie anatolie@co.com     owner  active
-133      Ciocanel Razvan razvan@co.com       owner  active
-2 members | org:84
+101      Alice Johnson   alice@example.com   owner  active
+102      Bob Smith       bob@example.com     admin  active
+2 members | org:12345
 ```
 
 **JSON (`--json`)** — full API response:

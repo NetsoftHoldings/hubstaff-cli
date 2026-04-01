@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2024"
 description = "Token-efficient CLI for the Hubstaff Public API v2"
 license = "MIT"
-repository = "https://github.com/chocksy/hubstaff-cli"
+repository = "https://github.com/NetsoftHoldings/hubstaff-cli"
 
 [[bin]]
 name = "hubstaff-cli"
