@@ -11,8 +11,8 @@ name = "hubstaff"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+clap = { version = "4", default-features = false, features = ["derive", "std", "help", "usage"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"
@@ -22,7 +22,7 @@ dirs = "6"
 rand = "0.10"
 base64 = "0.22"
 sha2 = "0.11"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 url = "2"
 dotenvy = "0.15"
 
