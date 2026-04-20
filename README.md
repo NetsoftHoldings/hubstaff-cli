@@ -1,6 +1,6 @@
 # Hubstaff CLI
 
-`hubstaff` is a command-line interface for the [Hubstaff Public API v2](https://developer.hubstaff.com).
+`hubstaff` is a command-line interface for the [Hubstaff Public API](https://developer.hubstaff.com/docs/hubstaff_v2).
 Use it to work with organizations, projects, members, invites, tasks, and activity data directly from your terminal.
 
 - Works any AI agent (Claude, Codex, Copilot, Gemini)
