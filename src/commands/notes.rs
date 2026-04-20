@@ -13,9 +13,7 @@ pub fn list(
     page_limit: Option<u64>,
 ) -> Result<(), CliError> {
     let start_ts = normalize_timestamp(start);
-    let stop_ts = stop
-        .map(normalize_timestamp)
-        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+    let stop_ts = stop.map_or_else(|| chrono::Utc::now().to_rfc3339(), normalize_timestamp);
 
     let mut params = HashMap::new();
     params.insert("time_slot[start]".to_string(), start_ts);
@@ -71,10 +69,13 @@ pub fn create(
     }
 
     if let Some(note) = data.get("note") {
-        let out = CompactOutput::one_liner("created", &[
-            ("note", format!("{}", note["id"])),
-            ("project", project_id.to_string()),
-        ]);
+        let out = CompactOutput::one_liner(
+            "created",
+            &[
+                ("note", format!("{}", note["id"])),
+                ("project", project_id.to_string()),
+            ],
+        );
         println!("{out}");
     }
     Ok(())

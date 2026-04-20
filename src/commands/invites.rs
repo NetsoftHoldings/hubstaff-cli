@@ -54,13 +54,16 @@ pub fn show(client: &mut HubstaffClient, invite_id: u64, json: bool) -> Result<(
     }
 
     if let Some(invite) = data.get("invite") {
-        let out = CompactOutput::details(invite, &[
-            ("ID", "id"),
-            ("Email", "email"),
-            ("Role", "role"),
-            ("Status", "status"),
-            ("Created", "created_at"),
-        ]);
+        let out = CompactOutput::details(
+            invite,
+            &[
+                ("ID", "id"),
+                ("Email", "email"),
+                ("Role", "role"),
+                ("Status", "status"),
+                ("Created", "created_at"),
+            ],
+        );
         print!("{out}");
     }
     Ok(())
@@ -90,12 +93,18 @@ pub fn create(
     }
 
     if let Some(invite) = data.get("invite") {
-        let out = CompactOutput::one_liner("created", &[
-            ("invite", format!("{}", invite["id"])),
-            ("email", email.to_string()),
-            ("role", invite["role"].as_str().unwrap_or("-").to_string()),
-            ("status", invite["status"].as_str().unwrap_or("-").to_string()),
-        ]);
+        let out = CompactOutput::one_liner(
+            "created",
+            &[
+                ("invite", format!("{}", invite["id"])),
+                ("email", email.to_string()),
+                ("role", invite["role"].as_str().unwrap_or("-").to_string()),
+                (
+                    "status",
+                    invite["status"].as_str().unwrap_or("-").to_string(),
+                ),
+            ],
+        );
         println!("{out}");
     }
     Ok(())

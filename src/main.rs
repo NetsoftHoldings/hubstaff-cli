@@ -9,7 +9,11 @@ use clap::{Parser, Subcommand};
 use client::HubstaffClient;
 
 #[derive(Parser)]
-#[command(name = "hubstaff-cli", version, about = "Token-efficient CLI for the Hubstaff Public API v2")]
+#[command(
+    name = "hubstaff",
+    version,
+    about = "Token-efficient CLI for the Hubstaff Public API v2"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -329,6 +333,7 @@ fn main() {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run(cli: &Cli) -> Result<(), error::CliError> {
     match &cli.command {
         Commands::Config { action } => match action {
@@ -356,27 +361,25 @@ fn run(cli: &Cli) -> Result<(), error::CliError> {
                     }
                     OrgsAction::Show { id } => commands::orgs::show(&mut client, *id, cli.json),
                 },
-                Commands::Projects { action } => {
-                    match action {
-                        ProjectsAction::List => {
-                            let org = client.resolve_org(cli.org)?;
-                            commands::projects::list(
-                                &mut client,
-                                org,
-                                cli.json,
-                                cli.page_start,
-                                cli.page_limit,
-                            )
-                        }
-                        ProjectsAction::Show { id } => {
-                            commands::projects::show(&mut client, *id, cli.json)
-                        }
-                        ProjectsAction::Create { name } => {
-                            let org = client.resolve_org(cli.org)?;
-                            commands::projects::create(&mut client, org, name, cli.json)
-                        }
+                Commands::Projects { action } => match action {
+                    ProjectsAction::List => {
+                        let org = client.resolve_org(cli.org)?;
+                        commands::projects::list(
+                            &mut client,
+                            org,
+                            cli.json,
+                            cli.page_start,
+                            cli.page_limit,
+                        )
                     }
-                }
+                    ProjectsAction::Show { id } => {
+                        commands::projects::show(&mut client, *id, cli.json)
+                    }
+                    ProjectsAction::Create { name } => {
+                        let org = client.resolve_org(cli.org)?;
+                        commands::projects::create(&mut client, org, name, cli.json)
+                    }
+                },
                 Commands::Members { action } => match action {
                     MembersAction::List {
                         project,
@@ -562,13 +565,9 @@ fn run(cli: &Cli) -> Result<(), error::CliError> {
                         project,
                         start,
                         stop,
-                    } => commands::time_entries::create(
-                        &mut client,
-                        *project,
-                        start,
-                        stop,
-                        cli.json,
-                    ),
+                    } => {
+                        commands::time_entries::create(&mut client, *project, start, stop, cli.json)
+                    }
                 },
                 Commands::Config { .. } | Commands::Login | Commands::Logout => unreachable!(),
             }

@@ -7,7 +7,10 @@ use std::path::PathBuf;
 pub struct Config {
     #[serde(default = "default_api_url")]
     pub api_url: String,
-    #[serde(default = "default_auth_url", skip_serializing_if = "is_default_auth_url")]
+    #[serde(
+        default = "default_auth_url",
+        skip_serializing_if = "is_default_auth_url"
+    )]
     pub auth_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub org: Option<u64>,
@@ -64,14 +67,14 @@ fn default_format() -> String {
 impl Config {
     pub fn config_dir() -> PathBuf {
         if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            PathBuf::from(xdg).join("hubstaff-cli")
+            PathBuf::from(xdg).join("hubstaff")
         } else if let Some(config) = dirs::config_dir() {
-            config.join("hubstaff-cli")
+            config.join("hubstaff")
         } else {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".config")
-                .join("hubstaff-cli")
+                .join("hubstaff")
         }
     }
 
@@ -114,19 +117,14 @@ impl Config {
     }
 
     pub fn get_token(&self) -> Option<String> {
-        // Priority: env var > config auth token
-        if let Ok(token) = std::env::var("HUBSTAFF_API_TOKEN")
-            && !token.is_empty()
-        {
-            return Some(token);
-        }
+        // Environment token precedence is handled by HubstaffClient.
         self.auth.access_token.clone()
     }
 
     pub fn resolve_org(&self, cli_org: Option<u64>) -> Result<u64, CliError> {
         cli_org.or(self.org).ok_or_else(|| {
             CliError::Config(
-                "--org required. Set a default with 'hubstaff-cli config set org <id>'".to_string(),
+                "--org required. Set a default with 'hubstaff config set org <id>'".to_string(),
             )
         })
     }
@@ -195,8 +193,10 @@ mod tests {
 
     #[test]
     fn config_serialization_includes_org_when_set() {
-        let mut config = Config::default();
-        config.org = Some(12345);
+        let config = Config {
+            org: Some(12345),
+            ..Default::default()
+        };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         assert!(toml_str.contains("org = 12345"));
     }
@@ -210,15 +210,17 @@ mod tests {
 
     #[test]
     fn config_serialization_includes_custom_auth_url() {
-        let mut config = Config::default();
-        config.auth_url = "https://account.staging.hbstf.co".to_string();
+        let config = Config {
+            auth_url: "https://account.staging.hbstf.co".to_string(),
+            ..Default::default()
+        };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         assert!(toml_str.contains("auth_url"));
     }
 
     #[test]
     fn config_deserialization_with_defaults() {
-        let toml_str = r#"org = 42"#;
+        let toml_str = r"org = 42";
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.org, Some(42));
         assert_eq!(config.api_url, "https://api.hubstaff.com/v2");
@@ -250,9 +252,14 @@ expires_at = "2026-04-01T00:00:00Z"
 
     #[test]
     fn config_roundtrip_serialization() {
-        let mut config = Config::default();
-        config.org = Some(555);
-        config.auth.access_token = Some("my_token".to_string());
+        let config = Config {
+            org: Some(555),
+            auth: AuthConfig {
+                access_token: Some("my_token".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
@@ -266,31 +273,30 @@ expires_at = "2026-04-01T00:00:00Z"
     fn get_token_returns_config_token() {
         let mut config = Config::default();
         config.auth.access_token = Some("config_token".to_string());
-        // Remove env var if set
-        // SAFETY: tests run single-threaded for env var tests (use cargo test -- --test-threads=1)
-        unsafe { std::env::remove_var("HUBSTAFF_API_TOKEN") };
         assert_eq!(config.get_token(), Some("config_token".to_string()));
     }
 
     #[test]
     fn get_token_returns_none_when_empty() {
         let config = Config::default();
-        // SAFETY: tests run single-threaded for env var tests (use cargo test -- --test-threads=1)
-        unsafe { std::env::remove_var("HUBSTAFF_API_TOKEN") };
         assert!(config.get_token().is_none());
     }
 
     #[test]
     fn resolve_org_uses_cli_arg_first() {
-        let mut config = Config::default();
-        config.org = Some(100);
+        let config = Config {
+            org: Some(100),
+            ..Default::default()
+        };
         assert_eq!(config.resolve_org(Some(200)).unwrap(), 200);
     }
 
     #[test]
     fn resolve_org_falls_back_to_config() {
-        let mut config = Config::default();
-        config.org = Some(100);
+        let config = Config {
+            org: Some(100),
+            ..Default::default()
+        };
         assert_eq!(config.resolve_org(None).unwrap(), 100);
     }
 

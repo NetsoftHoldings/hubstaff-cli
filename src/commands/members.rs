@@ -163,7 +163,13 @@ pub fn create(
         let mut fields = vec![
             ("member", format!("{}", member["id"])),
             ("email", email.to_string()),
-            ("role", member["membership_role"].as_str().unwrap_or("-").to_string()),
+            (
+                "role",
+                member["membership_role"]
+                    .as_str()
+                    .unwrap_or("-")
+                    .to_string(),
+            ),
         ];
         if auto_generated {
             fields.push(("generated_password", actual_password));
@@ -191,10 +197,10 @@ pub fn remove(
         return Ok(());
     }
 
-    let out = CompactOutput::one_liner("removed", &[
-        ("user", user_id.to_string()),
-        ("org", org_id.to_string()),
-    ]);
+    let out = CompactOutput::one_liner(
+        "removed",
+        &[("user", user_id.to_string()), ("org", org_id.to_string())],
+    );
     println!("{out}");
     Ok(())
 }
@@ -218,11 +224,11 @@ fn merge_users(data: &mut serde_json::Value) {
 
     if let Some(members) = data.get_mut("members").and_then(|m| m.as_array_mut()) {
         for member in members {
-            if let Some(uid) = member.get("user_id").and_then(|v| v.as_u64()) {
-                if let Some((name, email)) = users.get(&uid) {
-                    member["name"] = serde_json::Value::String(name.clone());
-                    member["email"] = serde_json::Value::String(email.clone());
-                }
+            if let Some(uid) = member.get("user_id").and_then(serde_json::Value::as_u64)
+                && let Some((name, email)) = users.get(&uid)
+            {
+                member["name"] = serde_json::Value::String(name.clone());
+                member["email"] = serde_json::Value::String(email.clone());
             }
         }
     }

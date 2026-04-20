@@ -1,5 +1,5 @@
 [package]
-name = "hubstaff-cli"
+name = "hubstaff"
 version = "0.2.0"
 edition = "2024"
 description = "Token-efficient CLI for the Hubstaff Public API v2"
@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/NetsoftHoldings/hubstaff-cli"
 
 [[bin]]
-name = "hubstaff-cli"
+name = "hubstaff"
 path = "src/main.rs"
 
 [dependencies]
@@ -30,6 +30,20 @@ dotenvy = "0.15"
 mockito = "1"
 
 [profile.release]
-strip = true
+opt-level = "z"
 lto = true
 codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+# SQL keywords and identifiers in docs (NOT VALID, ACCESS EXCLUSIVE, etc.) look awkward in backticks
+doc_markdown = "allow"
+# Internal helpers and CLI binary; #[must_use] annotation on every helper adds noise without benefit
+must_use_candidate = "allow"
+# We don't maintain exhaustive API docs with # Errors sections
+missing_errors_doc = "allow"

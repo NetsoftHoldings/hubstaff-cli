@@ -23,12 +23,21 @@ pub fn create(
     }
 
     if let Some(entry) = data.get("time_entry") {
-        let out = CompactOutput::one_liner("created", &[
-            ("time_entry", format!("{}", entry["id"])),
-            ("project", project_id.to_string()),
-            ("start", entry["started_at"].as_str().unwrap_or("-").to_string()),
-            ("stop", entry["stopped_at"].as_str().unwrap_or("-").to_string()),
-        ]);
+        let out = CompactOutput::one_liner(
+            "created",
+            &[
+                ("time_entry", format!("{}", entry["id"])),
+                ("project", project_id.to_string()),
+                (
+                    "start",
+                    entry["started_at"].as_str().unwrap_or("-").to_string(),
+                ),
+                (
+                    "stop",
+                    entry["stopped_at"].as_str().unwrap_or("-").to_string(),
+                ),
+            ],
+        );
         println!("{out}");
     }
     Ok(())

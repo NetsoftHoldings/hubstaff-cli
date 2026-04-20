@@ -45,11 +45,10 @@ pub fn show(client: &mut HubstaffClient, team_id: u64, json: bool) -> Result<(),
     }
 
     if let Some(team) = data.get("team") {
-        let out = CompactOutput::details(team, &[
-            ("ID", "id"),
-            ("Name", "name"),
-            ("Created", "created_at"),
-        ]);
+        let out = CompactOutput::details(
+            team,
+            &[("ID", "id"), ("Name", "name"), ("Created", "created_at")],
+        );
         print!("{out}");
     }
     Ok(())

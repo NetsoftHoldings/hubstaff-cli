@@ -9,8 +9,10 @@ use std::time::Duration;
 pub struct HubstaffClient {
     config: Config,
     http: Client,
+    env_api_token: Option<String>,
 }
 
+#[derive(Clone, Copy)]
 enum Method {
     Get,
     Post,
@@ -24,13 +26,39 @@ impl HubstaffClient {
             .timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| CliError::Network(format!("failed to create HTTP client: {e}")))?;
-        Ok(Self { config, http })
+        Ok(Self {
+            config,
+            http,
+            env_api_token: Self::read_env_api_token(),
+        })
+    }
+
+    #[cfg(test)]
+    fn new_with_env_token(config: Config, env_api_token: Option<String>) -> Result<Self, CliError> {
+        let http = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| CliError::Network(format!("failed to create HTTP client: {e}")))?;
+        Ok(Self {
+            config,
+            http,
+            env_api_token,
+        })
+    }
+
+    fn read_env_api_token() -> Option<String> {
+        std::env::var("HUBSTAFF_API_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty())
     }
 
     fn token(&self) -> Result<String, CliError> {
+        if let Some(token) = &self.env_api_token {
+            return Ok(token.clone());
+        }
         self.config.get_token().ok_or_else(|| {
             CliError::Auth(
-                "not authenticated. Run 'hubstaff-cli login' or set HUBSTAFF_API_TOKEN".to_string(),
+                "not authenticated. Run 'hubstaff login' or set HUBSTAFF_API_TOKEN".to_string(),
             )
         })
     }
@@ -57,7 +85,7 @@ impl HubstaffClient {
 
     fn build_request(
         &self,
-        method: &Method,
+        method: Method,
         url: &str,
         params: &HashMap<String, String>,
         body: &Value,
@@ -83,14 +111,14 @@ impl HubstaffClient {
         let token = self.token()?;
 
         let resp = self
-            .build_request(&method, &url, params, body, &token)
+            .build_request(method, &url, params, body, &token)
             .send()?;
 
         let status = resp.status().as_u16();
 
         // Token refresh on 401
         if status == 401 {
-            if std::env::var("HUBSTAFF_API_TOKEN").is_ok_and(|v| !v.is_empty()) {
+            if self.env_api_token.is_some() {
                 return Err(CliError::Auth(
                     "invalid token. Check your HUBSTAFF_API_TOKEN".to_string(),
                 ));
@@ -100,13 +128,13 @@ impl HubstaffClient {
             let new_token = self.token()?;
 
             let retry_resp = self
-                .build_request(&method, &url, params, body, &new_token)
+                .build_request(method, &url, params, body, &new_token)
                 .send()?;
 
             let retry_status = retry_resp.status().as_u16();
             if retry_status == 401 {
                 return Err(CliError::Auth(
-                    "session expired. Run 'hubstaff-cli login'".to_string(),
+                    "session expired. Run 'hubstaff login'".to_string(),
                 ));
             }
             return Self::parse_response(retry_resp, retry_status);
@@ -142,7 +170,11 @@ impl HubstaffClient {
         let body: Value = match serde_json::from_str(&text) {
             Ok(v) => v,
             Err(_) if status >= 400 => {
-                let preview = if text.len() > 200 { &text[..200] } else { &text };
+                let preview = if text.len() > 200 {
+                    &text[..200]
+                } else {
+                    &text
+                };
                 return Err(CliError::Api {
                     status,
                     code: "non_json_error".to_string(),
@@ -153,10 +185,7 @@ impl HubstaffClient {
         };
 
         if status >= 400 {
-            let code = body["code"]
-                .as_str()
-                .unwrap_or("api_error")
-                .to_string();
+            let code = body["code"].as_str().unwrap_or("api_error").to_string();
             let message = body["error"]
                 .as_str()
                 .unwrap_or("unknown API error")
@@ -179,20 +208,24 @@ impl HubstaffClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockito;
 
     fn test_config(server_url: &str) -> Config {
-        let mut config = Config::default();
-        config.api_url = server_url.to_string();
-        config.auth.access_token = Some("test_token".to_string());
-        config
+        Config {
+            api_url: server_url.to_string(),
+            auth: crate::config::AuthConfig {
+                access_token: Some("test_token".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn test_client(config: Config) -> HubstaffClient {
+        HubstaffClient::new_with_env_token(config, None).unwrap()
     }
 
     #[test]
     fn get_success() {
-        // SAFETY: test environment
-        unsafe { std::env::remove_var("HUBSTAFF_API_TOKEN") };
-
         let mut server = mockito::Server::new();
         let mock = server
             .mock("GET", "/users/me")
@@ -203,7 +236,7 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let result = client.get("/users/me", &HashMap::new()).unwrap();
 
         assert_eq!(result["user"]["id"], 1);
@@ -216,15 +249,16 @@ mod tests {
         let mut server = mockito::Server::new();
         let mock = server
             .mock("GET", "/organizations/5/members")
-            .match_query(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("page_limit".into(), "10".into()),
-            ]))
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "page_limit".into(),
+                "10".into(),
+            )]))
             .with_status(200)
             .with_body(r#"{"members":[]}"#)
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let mut params = HashMap::new();
         params.insert("page_limit".to_string(), "10".to_string());
         client.get("/organizations/5/members", &params).unwrap();
@@ -243,7 +277,7 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let body = serde_json::json!({"name": "New"});
         let result = client.post("/organizations/1/projects", &body).unwrap();
 
@@ -261,9 +295,11 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let body = serde_json::json!({"members": [{"user_id": 1, "role": "remove"}]});
-        let result = client.put("/organizations/1/update_members", &body).unwrap();
+        let result = client
+            .put("/organizations/1/update_members", &body)
+            .unwrap();
 
         assert_eq!(result["ok"], true);
         mock.assert();
@@ -278,7 +314,7 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let result = client.delete("/invites/42").unwrap();
 
         assert!(result.is_null());
@@ -295,11 +331,15 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let err = client.get("/bad", &HashMap::new()).unwrap_err();
 
         match err {
-            CliError::Api { status, code, message } => {
+            CliError::Api {
+                status,
+                code,
+                message,
+            } => {
                 assert_eq!(status, 400);
                 assert_eq!(code, "invalid_params");
                 assert_eq!(message, "bad request");
@@ -318,7 +358,7 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let err = client.get("/missing", &HashMap::new()).unwrap_err();
 
         assert_eq!(err.exit_code(), 1);
@@ -335,11 +375,15 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let err = client.get("/limited", &HashMap::new()).unwrap_err();
 
         match err {
-            CliError::Api { status, code, message } => {
+            CliError::Api {
+                status,
+                code,
+                message,
+            } => {
                 assert_eq!(status, 429);
                 assert_eq!(code, "rate_limited");
                 assert!(message.contains("30"));
@@ -358,7 +402,7 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let err = client.get("/limited", &HashMap::new()).unwrap_err();
 
         match err {
@@ -377,11 +421,15 @@ mod tests {
             .create();
 
         let config = test_config(&server.url());
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let err = client.get("/html-error", &HashMap::new()).unwrap_err();
 
         match err {
-            CliError::Api { status, code, message } => {
+            CliError::Api {
+                status,
+                code,
+                message,
+            } => {
                 assert_eq!(status, 502);
                 assert_eq!(code, "non_json_error");
                 assert!(message.contains("Bad Gateway"));
@@ -392,10 +440,8 @@ mod tests {
 
     #[test]
     fn auth_error_no_token() {
-        // SAFETY: test environment
-        unsafe { std::env::remove_var("HUBSTAFF_API_TOKEN") };
         let config = Config::default(); // no token
-        let mut client = HubstaffClient::new(config).unwrap();
+        let mut client = test_client(config);
         let err = client.get("/anything", &HashMap::new()).unwrap_err();
 
         assert_eq!(err.exit_code(), 2);
@@ -410,19 +456,14 @@ mod tests {
             .with_body(r#"{"error":"invalid_token"}"#)
             .create();
 
-        // Use a unique env var test: set it, make request, clean up
-        // SAFETY: test environment
-        unsafe { std::env::set_var("HUBSTAFF_API_TOKEN", "bad_env_token") };
-
-        let mut config = Config::default();
-        config.api_url = server.url();
-        // No config token — only env var
-        let mut client = HubstaffClient::new(config).unwrap();
+        // No config token — only injected env token.
+        let config = Config {
+            api_url: server.url(),
+            ..Default::default()
+        };
+        let mut client =
+            HubstaffClient::new_with_env_token(config, Some("bad_env_token".to_string())).unwrap();
         let err = client.get("/protected", &HashMap::new()).unwrap_err();
-
-        // Clean up immediately
-        // SAFETY: test environment
-        unsafe { std::env::remove_var("HUBSTAFF_API_TOKEN") };
 
         // Should tell user to check env var, not try refresh
         assert_eq!(err.exit_code(), 2);
@@ -430,9 +471,11 @@ mod tests {
 
     #[test]
     fn resolve_org_delegates_to_config() {
-        let mut config = Config::default();
-        config.org = Some(42);
-        let client = HubstaffClient::new(config).unwrap();
+        let config = Config {
+            org: Some(42),
+            ..Default::default()
+        };
+        let client = test_client(config);
         assert_eq!(client.resolve_org(None).unwrap(), 42);
         assert_eq!(client.resolve_org(Some(99)).unwrap(), 99);
     }
@@ -444,15 +487,12 @@ mod tests {
             .mock("GET", "/test")
             .match_header("authorization", "Bearer my_secret_token")
             .with_status(200)
-            .with_body(r#"{}"#)
+            .with_body(r"{}")
             .create();
 
         let mut config = test_config(&server.url());
         config.auth.access_token = Some("my_secret_token".to_string());
-        let mut client = HubstaffClient::new(config).unwrap();
-
-        // SAFETY: test environment
-        unsafe { std::env::remove_var("HUBSTAFF_API_TOKEN") };
+        let mut client = test_client(config);
         client.get("/test", &HashMap::new()).unwrap();
 
         mock.assert();

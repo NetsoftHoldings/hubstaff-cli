@@ -15,9 +15,8 @@ impl CompactOutput {
         footer_label: &str,
         footer_context: &str,
     ) -> String {
-        let items = match data.get(root_key).and_then(|v| v.as_array()) {
-            Some(arr) => arr,
-            None => return format!("0 {footer_label} | {footer_context}"),
+        let Some(items) = data.get(root_key).and_then(|v| v.as_array()) else {
+            return format!("0 {footer_label} | {footer_context}");
         };
 
         if items.is_empty() {
@@ -73,7 +72,9 @@ impl CompactOutput {
 
         // Pagination hint
         if let Some(pagination) = data.get("pagination")
-            && let Some(next_id) = pagination.get("next_page_start_id").and_then(|v| v.as_u64())
+            && let Some(next_id) = pagination
+                .get("next_page_start_id")
+                .and_then(serde_json::Value::as_u64)
         {
             let _ = write!(footer, " | next: --page-start {next_id}");
         }
@@ -205,10 +206,10 @@ mod tests {
 
     #[test]
     fn one_liner_format() {
-        let out = CompactOutput::one_liner("created", &[
-            ("id", "123".to_string()),
-            ("name", "Test".to_string()),
-        ]);
+        let out = CompactOutput::one_liner(
+            "created",
+            &[("id", "123".to_string()), ("name", "Test".to_string())],
+        );
         assert_eq!(out, "created | id:123 | name:Test");
     }
 

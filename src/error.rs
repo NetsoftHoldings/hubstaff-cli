@@ -3,7 +3,11 @@ use std::process;
 
 #[derive(Debug)]
 pub enum CliError {
-    Api { status: u16, code: String, message: String },
+    Api {
+        status: u16,
+        code: String,
+        message: String,
+    },
     Auth(String),
     Config(String),
     Network(String),
@@ -46,10 +50,12 @@ impl CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CliError::Api { status, message, .. } => write!(f, "[{status}] {message}"),
-            CliError::Auth(msg) => write!(f, "{msg}"),
-            CliError::Config(msg) => write!(f, "{msg}"),
-            CliError::Network(msg) => write!(f, "{msg}"),
+            CliError::Api {
+                status, message, ..
+            } => write!(f, "[{status}] {message}"),
+            CliError::Auth(msg) | CliError::Config(msg) | CliError::Network(msg) => {
+                write!(f, "{msg}")
+            }
         }
     }
 }

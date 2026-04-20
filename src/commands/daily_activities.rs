@@ -13,9 +13,10 @@ pub fn list(
     page_limit: Option<u64>,
 ) -> Result<(), CliError> {
     let start_date = normalize_date(start);
-    let stop_date = stop
-        .map(normalize_date)
-        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+    let stop_date = stop.map_or_else(
+        || chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        normalize_date,
+    );
 
     let mut params = HashMap::new();
     params.insert("date[start]".to_string(), start_date);

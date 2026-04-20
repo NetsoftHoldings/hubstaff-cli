@@ -49,10 +49,7 @@ pub fn set_pat(pat: &str) -> Result<(), CliError> {
     let client = reqwest::blocking::Client::new();
     let resp = client
         .post(format!("{}/access_tokens", config.auth_url))
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", pat),
-        ])
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", pat)])
         .send()
         .map_err(|e| CliError::Network(format!("token exchange failed: {e}")))?;
 
@@ -146,7 +143,7 @@ pub fn setup_oauth() -> Result<(), CliError> {
     println!();
     println!("Saved to {}", env_path.display());
     println!();
-    println!("You can now run: hubstaff-cli login");
+    println!("You can now run: hubstaff login");
     Ok(())
 }
 

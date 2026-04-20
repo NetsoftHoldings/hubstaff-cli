@@ -45,12 +45,15 @@ pub fn show(client: &mut HubstaffClient, project_id: u64, json: bool) -> Result<
     }
 
     if let Some(project) = data.get("project") {
-        let out = CompactOutput::details(project, &[
-            ("ID", "id"),
-            ("Name", "name"),
-            ("Status", "status"),
-            ("Created", "created_at"),
-        ]);
+        let out = CompactOutput::details(
+            project,
+            &[
+                ("ID", "id"),
+                ("Name", "name"),
+                ("Status", "status"),
+                ("Created", "created_at"),
+            ],
+        );
         print!("{out}");
     }
     Ok(())
@@ -71,11 +74,17 @@ pub fn create(
     }
 
     if let Some(project) = data.get("project") {
-        let out = CompactOutput::one_liner("created", &[
-            ("project", format!("{}", project["id"])),
-            ("name", project["name"].as_str().unwrap_or("-").to_string()),
-            ("status", project["status"].as_str().unwrap_or("-").to_string()),
-        ]);
+        let out = CompactOutput::one_liner(
+            "created",
+            &[
+                ("project", format!("{}", project["id"])),
+                ("name", project["name"].as_str().unwrap_or("-").to_string()),
+                (
+                    "status",
+                    project["status"].as_str().unwrap_or("-").to_string(),
+                ),
+            ],
+        );
         println!("{out}");
     }
     Ok(())

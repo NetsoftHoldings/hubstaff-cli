@@ -50,14 +50,17 @@ pub fn show(client: &mut HubstaffClient, task_id: u64, json: bool) -> Result<(),
     }
 
     if let Some(task) = data.get("task") {
-        let out = CompactOutput::details(task, &[
-            ("ID", "id"),
-            ("Summary", "summary"),
-            ("Status", "status"),
-            ("Assignee", "assignee_id"),
-            ("Project", "project_id"),
-            ("Created", "created_at"),
-        ]);
+        let out = CompactOutput::details(
+            task,
+            &[
+                ("ID", "id"),
+                ("Summary", "summary"),
+                ("Status", "status"),
+                ("Assignee", "assignee_id"),
+                ("Project", "project_id"),
+                ("Created", "created_at"),
+            ],
+        );
         print!("{out}");
     }
     Ok(())
@@ -83,11 +86,17 @@ pub fn create(
     }
 
     if let Some(task) = data.get("task") {
-        let out = CompactOutput::one_liner("created", &[
-            ("task", format!("{}", task["id"])),
-            ("summary", task["summary"].as_str().unwrap_or("-").to_string()),
-            ("project", project_id.to_string()),
-        ]);
+        let out = CompactOutput::one_liner(
+            "created",
+            &[
+                ("task", format!("{}", task["id"])),
+                (
+                    "summary",
+                    task["summary"].as_str().unwrap_or("-").to_string(),
+                ),
+                ("project", project_id.to_string()),
+            ],
+        );
         println!("{out}");
     }
     Ok(())

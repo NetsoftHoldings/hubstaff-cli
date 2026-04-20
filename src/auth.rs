@@ -19,12 +19,12 @@ fn client_id() -> Result<String, CliError> {
              1. Go to https://developer.hubstaff.com > OAuth Apps > Create\n\
              2. Set redirect URI to http://localhost:19876/callback\n\
              3. Copy the Client ID and Client Secret\n\
-             4. Run:  hubstaff-cli config setup-oauth\n\
+             4. Run:  hubstaff config setup-oauth\n\
              \n\
              Or set HUBSTAFF_CLIENT_ID and HUBSTAFF_CLIENT_SECRET env vars.\n\
              \n\
              Alternative: skip OAuth and use a personal access token:\n\
-               hubstaff-cli config set-pat YOUR_TOKEN"
+               hubstaff config set-pat YOUR_TOKEN"
                 .into(),
         )
     })
@@ -34,7 +34,7 @@ fn client_secret() -> Result<String, CliError> {
     std::env::var("HUBSTAFF_CLIENT_SECRET").map_err(|_| {
         CliError::Config(
             "HUBSTAFF_CLIENT_SECRET not set.\n\
-             Run: hubstaff-cli config setup-oauth\n\
+             Run: hubstaff config setup-oauth\n\
              Or set the HUBSTAFF_CLIENT_SECRET env var."
                 .into(),
         )
@@ -62,7 +62,7 @@ pub fn login() -> Result<(), CliError> {
         eprintln!("warning: could not open browser automatically");
     }
 
-    let code = wait_for_callback(server, &state)?;
+    let code = wait_for_callback(&server, &state)?;
     let tokens = exchange_code(auth_base, &id, &secret, &code, &verifier, &redirect_uri)?;
 
     let mut config = Config::load()?;
@@ -93,23 +93,20 @@ pub fn refresh_token(config: &mut Config) -> Result<(), CliError> {
         .auth
         .refresh_token
         .as_ref()
-        .ok_or_else(|| CliError::Auth("session expired. Run 'hubstaff-cli login'".to_string()))?
+        .ok_or_else(|| CliError::Auth("session expired. Run 'hubstaff login'".to_string()))?
         .clone();
 
     let client = reqwest::blocking::Client::new();
     let resp = client
         .post(format!("{auth_base}/access_tokens"))
         .basic_auth(&id, Some(&secret))
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", &refresh),
-        ])
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", &refresh)])
         .send()
         .map_err(|e| CliError::Network(format!("token refresh failed: {e}")))?;
 
     if !resp.status().is_success() {
         return Err(CliError::Auth(
-            "session expired. Run 'hubstaff-cli login'".to_string(),
+            "session expired. Run 'hubstaff login'".to_string(),
         ));
     }
 
@@ -167,7 +164,13 @@ fn generate_nonce() -> String {
     URL_SAFE_NO_PAD.encode(&nonce_bytes)
 }
 
-fn build_auth_url(auth_base: &str, client_id: &str, challenge: &str, redirect_uri: &str, state: &str) -> String {
+fn build_auth_url(
+    auth_base: &str,
+    client_id: &str,
+    challenge: &str,
+    redirect_uri: &str,
+    state: &str,
+) -> String {
     let nonce = generate_nonce();
     let mut url = Url::parse(&format!("{auth_base}/authorizations/new")).unwrap();
     url.query_pairs_mut()
@@ -184,9 +187,8 @@ fn build_auth_url(auth_base: &str, client_id: &str, challenge: &str, redirect_ur
 
 fn start_callback_server() -> Result<(tiny_http::Server, u16), CliError> {
     for port in PORT_START..=PORT_END {
-        match tiny_http::Server::http(format!("127.0.0.1:{port}")) {
-            Ok(server) => return Ok((server, port)),
-            Err(_) => continue,
+        if let Ok(server) = tiny_http::Server::http(format!("127.0.0.1:{port}")) {
+            return Ok((server, port));
         }
     }
     Err(CliError::Auth(format!(
@@ -194,86 +196,80 @@ fn start_callback_server() -> Result<(tiny_http::Server, u16), CliError> {
     )))
 }
 
-fn wait_for_callback(server: tiny_http::Server, expected_state: &str) -> Result<String, CliError> {
+fn wait_for_callback(server: &tiny_http::Server, expected_state: &str) -> Result<String, CliError> {
     let timeout = std::time::Duration::from_secs(CALLBACK_TIMEOUT_SECS);
     let start = std::time::Instant::now();
 
     loop {
         if start.elapsed() > timeout {
             return Err(CliError::Auth(
-                "authentication timed out. Try 'hubstaff-cli login' again".to_string(),
+                "authentication timed out. Try 'hubstaff login' again".to_string(),
             ));
         }
 
-        match server.recv_timeout(std::time::Duration::from_secs(1)) {
-            Ok(Some(request)) => {
-                let url_str = format!("http://localhost{}", request.url());
-                let url = Url::parse(&url_str)
-                    .map_err(|e| CliError::Auth(format!("failed to parse callback URL: {e}")))?;
+        if let Ok(Some(request)) = server.recv_timeout(std::time::Duration::from_secs(1)) {
+            let url_str = format!("http://localhost{}", request.url());
+            let url = Url::parse(&url_str)
+                .map_err(|e| CliError::Auth(format!("failed to parse callback URL: {e}")))?;
 
-                let code = url
-                    .query_pairs()
-                    .find(|(k, _)| k == "code")
-                    .map(|(_, v)| v.to_string());
+            let code = url
+                .query_pairs()
+                .find(|(k, _)| k == "code")
+                .map(|(_, v)| v.to_string());
 
-                let error = url
-                    .query_pairs()
-                    .find(|(k, _)| k == "error")
-                    .map(|(_, v)| v.to_string());
+            let error = url
+                .query_pairs()
+                .find(|(k, _)| k == "error")
+                .map(|(_, v)| v.to_string());
 
-                if let Some(err) = error {
-                    let html = "<html><body><h2>Authentication failed</h2>\
-                                <p>Please try again.</p></body></html>";
-                    let response = tiny_http::Response::from_string(html)
-                        .with_header(
-                            "Content-Type: text/html"
-                                .parse::<tiny_http::Header>()
-                                .unwrap(),
-                        );
-                    let _ = request.respond(response);
-                    return Err(CliError::Auth(format!("authentication denied: {err}")));
-                }
-
-                // Validate state parameter (CSRF protection)
-                let callback_state = url
-                    .query_pairs()
-                    .find(|(k, _)| k == "state")
-                    .map(|(_, v)| v.to_string());
-
-                if callback_state.as_deref() != Some(expected_state) {
-                    let html = "<html><body><h2>Authentication failed</h2>\
-                                <p>Invalid state parameter.</p></body></html>";
-                    let response = tiny_http::Response::from_string(html)
-                        .with_header(
-                            "Content-Type: text/html"
-                                .parse::<tiny_http::Header>()
-                                .unwrap(),
-                        );
-                    let _ = request.respond(response);
-                    return Err(CliError::Auth(
-                        "invalid state parameter in callback (possible CSRF)".to_string(),
-                    ));
-                }
-
-                if let Some(code) = code {
-                    let html = "<html><body><h2>Authentication successful</h2>\
-                                <p>You can close this tab.</p></body></html>";
-                    let response = tiny_http::Response::from_string(html).with_header(
-                        "Content-Type: text/html"
-                            .parse::<tiny_http::Header>()
-                            .unwrap(),
-                    );
-                    let _ = request.respond(response);
-                    return Ok(code);
-                }
-
-                // Not the callback we expected, respond with 404
-                let response = tiny_http::Response::from_string("not found")
-                    .with_status_code(tiny_http::StatusCode(404));
+            if let Some(err) = error {
+                let html = "<html><body><h2>Authentication failed</h2>\
+                            <p>Please try again.</p></body></html>";
+                let response = tiny_http::Response::from_string(html).with_header(
+                    "Content-Type: text/html"
+                        .parse::<tiny_http::Header>()
+                        .unwrap(),
+                );
                 let _ = request.respond(response);
+                return Err(CliError::Auth(format!("authentication denied: {err}")));
             }
-            Ok(None) => continue,
-            Err(_) => continue,
+
+            // Validate state parameter (CSRF protection)
+            let callback_state = url
+                .query_pairs()
+                .find(|(k, _)| k == "state")
+                .map(|(_, v)| v.to_string());
+
+            if callback_state.as_deref() != Some(expected_state) {
+                let html = "<html><body><h2>Authentication failed</h2>\
+                            <p>Invalid state parameter.</p></body></html>";
+                let response = tiny_http::Response::from_string(html).with_header(
+                    "Content-Type: text/html"
+                        .parse::<tiny_http::Header>()
+                        .unwrap(),
+                );
+                let _ = request.respond(response);
+                return Err(CliError::Auth(
+                    "invalid state parameter in callback (possible CSRF)".to_string(),
+                ));
+            }
+
+            if let Some(code) = code {
+                let html = "<html><body><h2>Authentication successful</h2>\
+                            <p>You can close this tab.</p></body></html>";
+                let response = tiny_http::Response::from_string(html).with_header(
+                    "Content-Type: text/html"
+                        .parse::<tiny_http::Header>()
+                        .unwrap(),
+                );
+                let _ = request.respond(response);
+                return Ok(code);
+            }
+
+            // Not the callback we expected, respond with 404
+            let response = tiny_http::Response::from_string("not found")
+                .with_status_code(tiny_http::StatusCode(404));
+            let _ = request.respond(response);
         }
     }
 }
@@ -341,7 +337,9 @@ pub fn generate_password() -> String {
     let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
         .chars()
         .collect();
-    (0..16).map(|_| chars[rng.random_range(0..chars.len())]).collect()
+    (0..16)
+        .map(|_| chars[rng.random_range(0..chars.len())])
+        .collect()
 }
 
 #[cfg(test)]
@@ -465,6 +463,6 @@ mod tests {
         let result = start_callback_server();
         assert!(result.is_ok());
         let (_, port) = result.unwrap();
-        assert!(port >= PORT_START && port <= PORT_END);
+        assert!((PORT_START..=PORT_END).contains(&port));
     }
 }

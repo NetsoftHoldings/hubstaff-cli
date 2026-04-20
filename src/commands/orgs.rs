@@ -27,11 +27,7 @@ pub fn list(
     let out = CompactOutput::table(
         &data,
         "organizations",
-        &[
-            ("ID", "id"),
-            ("NAME", "name"),
-            ("STATUS", "status"),
-        ],
+        &[("ID", "id"), ("NAME", "name"), ("STATUS", "status")],
         "organizations",
         "",
     );
@@ -48,12 +44,15 @@ pub fn show(client: &mut HubstaffClient, org_id: u64, json: bool) -> Result<(), 
     }
 
     if let Some(org) = data.get("organization") {
-        let out = CompactOutput::details(org, &[
-            ("ID", "id"),
-            ("Name", "name"),
-            ("Status", "status"),
-            ("Created", "created_at"),
-        ]);
+        let out = CompactOutput::details(
+            org,
+            &[
+                ("ID", "id"),
+                ("Name", "name"),
+                ("Status", "status"),
+                ("Created", "created_at"),
+            ],
+        );
         print!("{out}");
     }
     Ok(())

@@ -12,13 +12,16 @@ pub fn me(client: &mut HubstaffClient, json: bool) -> Result<(), CliError> {
     }
 
     if let Some(user) = data.get("user") {
-        let out = CompactOutput::details(user, &[
-            ("ID", "id"),
-            ("Name", "name"),
-            ("Email", "email"),
-            ("Time Zone", "time_zone"),
-            ("Created", "created_at"),
-        ]);
+        let out = CompactOutput::details(
+            user,
+            &[
+                ("ID", "id"),
+                ("Name", "name"),
+                ("Email", "email"),
+                ("Time Zone", "time_zone"),
+                ("Created", "created_at"),
+            ],
+        );
         print!("{out}");
     }
     Ok(())
@@ -33,13 +36,16 @@ pub fn show(client: &mut HubstaffClient, user_id: u64, json: bool) -> Result<(),
     }
 
     if let Some(user) = data.get("user") {
-        let out = CompactOutput::details(user, &[
-            ("ID", "id"),
-            ("Name", "name"),
-            ("Email", "email"),
-            ("Time Zone", "time_zone"),
-            ("Created", "created_at"),
-        ]);
+        let out = CompactOutput::details(
+            user,
+            &[
+                ("ID", "id"),
+                ("Name", "name"),
+                ("Email", "email"),
+                ("Time Zone", "time_zone"),
+                ("Created", "created_at"),
+            ],
+        );
         print!("{out}");
     }
     Ok(())

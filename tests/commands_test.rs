@@ -2,7 +2,7 @@
 
 mod helpers {
     pub fn cli_bin() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_BIN_EXE_hubstaff-cli"))
+        std::path::PathBuf::from(env!("CARGO_BIN_EXE_hubstaff"))
     }
 
     pub fn run(args: &[&str], xdg_dir: &str) -> (String, String, i32) {
@@ -23,7 +23,7 @@ mod helpers {
 fn cli_version() {
     let (stdout, _, code) = helpers::run(&["--version"], "/tmp/hcli-test-ver");
     assert_eq!(code, 0);
-    assert!(stdout.contains("hubstaff-cli"));
+    assert!(stdout.contains("hubstaff"));
     let _ = std::fs::remove_dir_all("/tmp/hcli-test-ver");
 }
 
@@ -31,9 +31,22 @@ fn cli_version() {
 fn cli_help_lists_all_commands() {
     let (stdout, _, code) = helpers::run(&["--help"], "/tmp/hcli-test-help");
     assert_eq!(code, 0);
-    for cmd in ["users", "orgs", "projects", "members", "invites", "tasks",
-                "activities", "daily-activities", "teams", "notes", "time-entries",
-                "config", "login", "logout"] {
+    for cmd in [
+        "users",
+        "orgs",
+        "projects",
+        "members",
+        "invites",
+        "tasks",
+        "activities",
+        "daily-activities",
+        "teams",
+        "notes",
+        "time-entries",
+        "config",
+        "login",
+        "logout",
+    ] {
         assert!(stdout.contains(cmd), "missing command: {cmd}");
     }
     let _ = std::fs::remove_dir_all("/tmp/hcli-test-help");
@@ -53,7 +66,16 @@ fn cli_members_help_lists_actions() {
 fn cli_members_create_help_shows_flags() {
     let (stdout, _, code) = helpers::run(&["members", "create", "--help"], "/tmp/hcli-test-mch");
     assert_eq!(code, 0);
-    for flag in ["--email", "--first-name", "--last-name", "--password", "--password-stdin", "--role", "--project-ids", "--team-ids"] {
+    for flag in [
+        "--email",
+        "--first-name",
+        "--last-name",
+        "--password",
+        "--password-stdin",
+        "--role",
+        "--project-ids",
+        "--team-ids",
+    ] {
         assert!(stdout.contains(flag), "missing flag: {flag}");
     }
     let _ = std::fs::remove_dir_all("/tmp/hcli-test-mch");
@@ -88,7 +110,15 @@ fn cli_config_set_and_show() {
     assert!(stdout.contains("access_token = ****"));
 
     // Set custom auth_url
-    let (stdout, _, code) = helpers::run(&["config", "set", "auth_url", "https://account.staging.hbstf.co"], dir);
+    let (stdout, _, code) = helpers::run(
+        &[
+            "config",
+            "set",
+            "auth_url",
+            "https://account.staging.hbstf.co",
+        ],
+        dir,
+    );
     assert_eq!(code, 0);
     assert!(stdout.contains("auth_url"));
 
