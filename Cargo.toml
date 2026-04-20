@@ -19,7 +19,7 @@ toml = "1.1"
 tiny_http = "0.12"
 open = "5"
 dirs = "6"
-rand = "0.9"
+rand = "0.10"
 base64 = "0.22"
 sha2 = "0.11"
 chrono = { version = "0.4", features = ["serde"] }

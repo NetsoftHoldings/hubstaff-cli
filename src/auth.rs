@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::CliError;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::Rng;
+use rand::RngExt;
 use sha2::{Digest, Sha256};
 use url::Url;
 
@@ -332,7 +332,6 @@ fn exchange_code(
 }
 
 pub fn generate_password() -> String {
-    use rand::Rng;
     let mut rng = rand::rng();
     let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
         .chars()
