@@ -138,8 +138,8 @@ mod tests {
 
     #[test]
     fn display_config_error() {
-        let err = CliError::Config("missing org".into());
-        assert_eq!(format!("{err}"), "missing org");
+        let err = CliError::Config("missing organization".into());
+        assert_eq!(format!("{err}"), "missing organization");
     }
 
     #[test]

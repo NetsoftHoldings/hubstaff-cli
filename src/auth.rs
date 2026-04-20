@@ -346,20 +346,21 @@ fn exchange_code(
     })
 }
 
-pub fn generate_password() -> String {
-    let mut rng = rand::rng();
-    let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
-        .chars()
-        .collect();
-    (0..16)
-        .map(|_| chars[rng.random_range(0..chars.len())])
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{AuthConfig, Config};
+
+    fn generate_password() -> String {
+        let mut rng = rand::rng();
+        let chars: Vec<char> =
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
+                .chars()
+                .collect();
+        (0..16)
+            .map(|_| chars[rng.random_range(0..chars.len())])
+            .collect()
+    }
 
     fn refresh_test_config(auth_url: String) -> Config {
         Config {

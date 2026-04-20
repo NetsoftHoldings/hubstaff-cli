@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+const DEFAULT_API_URL: &str = "https://api.hubstaff.com/v2";
+const DEFAULT_AUTH_URL: &str = "https://account.hubstaff.com";
+const DEFAULT_FORMAT: &str = "compact";
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_api_url")]
@@ -12,8 +16,11 @@ pub struct Config {
         skip_serializing_if = "is_default_auth_url"
     )]
     pub auth_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub org: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<u64>,
+    /// Explicit schema docs URL override. When unset, derived from `api_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_url: Option<String>,
     #[serde(default = "default_format")]
     pub format: String,
     #[serde(default, skip_serializing_if = "AuthConfig::is_empty")]
@@ -25,7 +32,8 @@ impl Default for Config {
         Self {
             api_url: default_api_url(),
             auth_url: default_auth_url(),
-            org: None,
+            organization: None,
+            schema_url: None,
             format: default_format(),
             auth: AuthConfig::default(),
         }
@@ -49,19 +57,19 @@ impl AuthConfig {
 }
 
 fn default_api_url() -> String {
-    "https://api.hubstaff.com/v2".to_string()
+    DEFAULT_API_URL.to_string()
 }
 
 fn default_auth_url() -> String {
-    "https://account.hubstaff.com".to_string()
+    DEFAULT_AUTH_URL.to_string()
 }
 
 fn is_default_auth_url(url: &str) -> bool {
-    url == default_auth_url()
+    url == DEFAULT_AUTH_URL
 }
 
 fn default_format() -> String {
-    "compact".to_string()
+    DEFAULT_FORMAT.to_string()
 }
 
 impl Config {
@@ -80,6 +88,22 @@ impl Config {
 
     pub fn config_path() -> PathBuf {
         Self::config_dir().join("config.toml")
+    }
+
+    pub fn schema_dir() -> PathBuf {
+        Self::config_dir().join("schema").join("v2")
+    }
+
+    pub fn schema_docs_path() -> PathBuf {
+        Self::schema_dir().join("docs.json")
+    }
+
+    pub fn schema_meta_path() -> PathBuf {
+        Self::schema_dir().join("meta.toml")
+    }
+
+    pub fn schema_command_index_path() -> PathBuf {
+        Self::schema_dir().join("command_index.json")
     }
 
     pub fn load() -> Result<Self, CliError> {
@@ -121,12 +145,19 @@ impl Config {
         self.auth.access_token.clone()
     }
 
-    pub fn resolve_org(&self, cli_org: Option<u64>) -> Result<u64, CliError> {
-        cli_org.or(self.org).ok_or_else(|| {
+    pub fn resolve_organization(&self, cli_organization: Option<u64>) -> Result<u64, CliError> {
+        cli_organization.or(self.organization).ok_or_else(|| {
             CliError::Config(
-                "--org required. Set a default with 'hubstaff config set org <id>'".to_string(),
+                "--organization required. Set a default with 'hubstaff config set organization <id>'"
+                    .to_string(),
             )
         })
+    }
+
+    pub fn effective_schema_url(&self) -> String {
+        self.schema_url
+            .clone()
+            .unwrap_or_else(|| format!("{}/docs", self.api_url.trim_end_matches('/')))
     }
 }
 
@@ -134,13 +165,22 @@ impl Config {
 mod tests {
     use super::*;
 
+    fn default_schema_url() -> String {
+        format!("{DEFAULT_API_URL}/docs")
+    }
+
     #[test]
     fn default_config_has_correct_values() {
         let config = Config::default();
         assert_eq!(config.api_url, "https://api.hubstaff.com/v2");
         assert_eq!(config.auth_url, "https://account.hubstaff.com");
+        assert_eq!(config.schema_url, None);
+        assert_eq!(
+            config.effective_schema_url(),
+            "https://api.hubstaff.com/v2/docs"
+        );
         assert_eq!(config.format, "compact");
-        assert!(config.org.is_none());
+        assert!(config.organization.is_none());
         assert!(config.auth.is_empty());
     }
 
@@ -185,20 +225,20 @@ mod tests {
     }
 
     #[test]
-    fn config_serialization_skips_none_org() {
+    fn config_serialization_skips_none_organization() {
         let config = Config::default();
         let toml_str = toml::to_string_pretty(&config).unwrap();
-        assert!(!toml_str.contains("org"));
+        assert!(!toml_str.contains("organization"));
     }
 
     #[test]
-    fn config_serialization_includes_org_when_set() {
+    fn config_serialization_includes_organization_when_set() {
         let config = Config {
-            org: Some(12345),
+            organization: Some(12345),
             ..Default::default()
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
-        assert!(toml_str.contains("org = 12345"));
+        assert!(toml_str.contains("organization = 12345"));
     }
 
     #[test]
@@ -219,13 +259,10 @@ mod tests {
     }
 
     #[test]
-    fn config_deserialization_with_defaults() {
-        let toml_str = r"org = 42";
+    fn config_deserialization_with_organization_key() {
+        let toml_str = r"organization = 42";
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.org, Some(42));
-        assert_eq!(config.api_url, "https://api.hubstaff.com/v2");
-        assert_eq!(config.auth_url, "https://account.hubstaff.com");
-        assert_eq!(config.format, "compact");
+        assert_eq!(config.organization, Some(42));
     }
 
     #[test]
@@ -233,7 +270,7 @@ mod tests {
         let toml_str = r#"
 api_url = "https://custom.api.com/v2"
 auth_url = "https://custom.auth.com"
-org = 99
+organization = 99
 format = "json"
 
 [auth]
@@ -244,7 +281,7 @@ expires_at = "2026-04-01T00:00:00Z"
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.api_url, "https://custom.api.com/v2");
         assert_eq!(config.auth_url, "https://custom.auth.com");
-        assert_eq!(config.org, Some(99));
+        assert_eq!(config.organization, Some(99));
         assert_eq!(config.format, "json");
         assert_eq!(config.auth.access_token.as_deref(), Some("tok123"));
         assert_eq!(config.auth.refresh_token.as_deref(), Some("ref456"));
@@ -253,7 +290,7 @@ expires_at = "2026-04-01T00:00:00Z"
     #[test]
     fn config_roundtrip_serialization() {
         let config = Config {
-            org: Some(555),
+            organization: Some(555),
             auth: AuthConfig {
                 access_token: Some("my_token".to_string()),
                 ..Default::default()
@@ -264,7 +301,7 @@ expires_at = "2026-04-01T00:00:00Z"
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
 
-        assert_eq!(parsed.org, Some(555));
+        assert_eq!(parsed.organization, Some(555));
         assert_eq!(parsed.auth.access_token.as_deref(), Some("my_token"));
         assert_eq!(parsed.api_url, config.api_url);
     }
@@ -283,30 +320,85 @@ expires_at = "2026-04-01T00:00:00Z"
     }
 
     #[test]
-    fn resolve_org_uses_cli_arg_first() {
+    fn resolve_organization_uses_cli_arg_first() {
         let config = Config {
-            org: Some(100),
+            organization: Some(100),
             ..Default::default()
         };
-        assert_eq!(config.resolve_org(Some(200)).unwrap(), 200);
+        assert_eq!(config.resolve_organization(Some(200)).unwrap(), 200);
     }
 
     #[test]
-    fn resolve_org_falls_back_to_config() {
+    fn resolve_organization_falls_back_to_config() {
         let config = Config {
-            org: Some(100),
+            organization: Some(100),
             ..Default::default()
         };
-        assert_eq!(config.resolve_org(None).unwrap(), 100);
+        assert_eq!(config.resolve_organization(None).unwrap(), 100);
     }
 
     #[test]
-    fn resolve_org_errors_when_neither_set() {
+    fn resolve_organization_errors_when_neither_set() {
         let config = Config::default();
-        let err = config.resolve_org(None).unwrap_err();
+        let err = config.resolve_organization(None).unwrap_err();
         match err {
-            CliError::Config(msg) => assert!(msg.contains("--org required")),
+            CliError::Config(msg) => assert!(msg.contains("--organization required")),
             _ => panic!("expected Config error"),
         }
+    }
+
+    #[test]
+    fn effective_schema_url_follows_custom_api_url() {
+        let config = Config {
+            api_url: "https://staging.api.hubstaff.com/v2".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.effective_schema_url(),
+            "https://staging.api.hubstaff.com/v2/docs"
+        );
+    }
+
+    #[test]
+    fn effective_schema_url_honors_explicit_schema_url() {
+        let config = Config {
+            schema_url: Some("https://example.com/schema.json".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.effective_schema_url(),
+            "https://example.com/schema.json"
+        );
+    }
+
+    #[test]
+    fn effective_schema_url_honors_explicit_default_schema_url() {
+        let config = Config {
+            api_url: "https://staging.api.hubstaff.com/v2".to_string(),
+            schema_url: Some(default_schema_url()),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.effective_schema_url(),
+            "https://api.hubstaff.com/v2/docs"
+        );
+    }
+
+    #[test]
+    fn config_roundtrip_preserves_explicit_default_schema_url() {
+        let config = Config {
+            api_url: "https://staging.api.hubstaff.com/v2".to_string(),
+            schema_url: Some(default_schema_url()),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        assert!(toml_str.contains("schema_url = \"https://api.hubstaff.com/v2/docs\""));
+
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.schema_url, Some(default_schema_url()));
+        assert_eq!(
+            parsed.effective_schema_url(),
+            "https://api.hubstaff.com/v2/docs"
+        );
     }
 }

@@ -20,6 +20,7 @@ enum Method {
     Post,
     Put,
     Delete,
+    Patch,
 }
 
 impl HubstaffClient {
@@ -32,19 +33,6 @@ impl HubstaffClient {
             config,
             http,
             env_api_token: Self::read_env_api_token(),
-        })
-    }
-
-    #[cfg(test)]
-    fn new_with_env_token(config: Config, env_api_token: Option<String>) -> Result<Self, CliError> {
-        let http = Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|e| CliError::Network(format!("failed to create HTTP client: {e}")))?;
-        Ok(Self {
-            config,
-            http,
-            env_api_token,
         })
     }
 
@@ -93,20 +81,15 @@ impl HubstaffClient {
         Ok(())
     }
 
-    pub fn get(&mut self, path: &str, params: &HashMap<String, String>) -> Result<Value, CliError> {
-        self.request(Method::Get, path, params, &Value::Null)
-    }
-
-    pub fn post(&mut self, path: &str, body: &Value) -> Result<Value, CliError> {
-        self.request(Method::Post, path, &HashMap::new(), body)
-    }
-
-    pub fn put(&mut self, path: &str, body: &Value) -> Result<Value, CliError> {
-        self.request(Method::Put, path, &HashMap::new(), body)
-    }
-
-    pub fn delete(&mut self, path: &str) -> Result<Value, CliError> {
-        self.request(Method::Delete, path, &HashMap::new(), &Value::Null)
+    pub fn request_json(
+        &mut self,
+        method: &str,
+        path: &str,
+        params: &HashMap<String, String>,
+        body: Option<&Value>,
+    ) -> Result<Value, CliError> {
+        let parsed_method = parse_method(method)?;
+        self.request(parsed_method, path, params, body)
     }
 
     fn build_request(
@@ -114,14 +97,20 @@ impl HubstaffClient {
         method: Method,
         url: &str,
         params: &HashMap<String, String>,
-        body: &Value,
+        body: Option<&Value>,
         token: &str,
     ) -> reqwest::blocking::RequestBuilder {
         let builder = match method {
             Method::Get => self.http.get(url).query(params),
-            Method::Post => self.http.post(url).json(body),
-            Method::Put => self.http.put(url).json(body),
-            Method::Delete => self.http.delete(url),
+            Method::Post => self.http.post(url).query(params),
+            Method::Put => self.http.put(url).query(params),
+            Method::Delete => self.http.delete(url).query(params),
+            Method::Patch => self.http.patch(url).query(params),
+        };
+        let builder = if let Some(body) = body {
+            builder.json(body)
+        } else {
+            builder
         };
         builder.bearer_auth(token)
     }
@@ -131,7 +120,7 @@ impl HubstaffClient {
         method: Method,
         path: &str,
         params: &HashMap<String, String>,
-        body: &Value,
+        body: Option<&Value>,
     ) -> Result<Value, CliError> {
         self.ensure_fresh_token()?;
 
@@ -228,14 +217,42 @@ impl HubstaffClient {
         Ok(body)
     }
 
-    pub fn resolve_org(&self, cli_org: Option<u64>) -> Result<u64, CliError> {
-        self.config.resolve_org(cli_org)
+    pub fn resolve_organization(&self, cli_organization: Option<u64>) -> Result<u64, CliError> {
+        self.config.resolve_organization(cli_organization)
+    }
+}
+
+fn parse_method(method: &str) -> Result<Method, CliError> {
+    match method.to_ascii_uppercase().as_str() {
+        "GET" => Ok(Method::Get),
+        "POST" => Ok(Method::Post),
+        "PUT" => Ok(Method::Put),
+        "DELETE" => Ok(Method::Delete),
+        "PATCH" => Ok(Method::Patch),
+        _ => Err(CliError::Config(format!(
+            "unsupported HTTP method: {method}"
+        ))),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn new_with_env_token(
+        config: Config,
+        env_api_token: Option<String>,
+    ) -> Result<HubstaffClient, CliError> {
+        let http = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| CliError::Network(format!("failed to create HTTP client: {e}")))?;
+        Ok(HubstaffClient {
+            config,
+            http,
+            env_api_token,
+        })
+    }
 
     fn test_config(server_url: &str) -> Config {
         Config {
@@ -249,7 +266,35 @@ mod tests {
     }
 
     fn test_client(config: Config) -> HubstaffClient {
-        HubstaffClient::new_with_env_token(config, None).unwrap()
+        new_with_env_token(config, None).unwrap()
+    }
+
+    fn get_json(
+        client: &mut HubstaffClient,
+        path: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<Value, CliError> {
+        client.request_json("GET", path, params, None)
+    }
+
+    fn post_json(client: &mut HubstaffClient, path: &str, body: &Value) -> Result<Value, CliError> {
+        client.request_json("POST", path, &HashMap::new(), Some(body))
+    }
+
+    fn put_json(client: &mut HubstaffClient, path: &str, body: &Value) -> Result<Value, CliError> {
+        client.request_json("PUT", path, &HashMap::new(), Some(body))
+    }
+
+    fn delete_json(client: &mut HubstaffClient, path: &str) -> Result<Value, CliError> {
+        client.request_json("DELETE", path, &HashMap::new(), None)
+    }
+
+    fn delete_json_with_body(
+        client: &mut HubstaffClient,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value, CliError> {
+        client.request_json("DELETE", path, &HashMap::new(), Some(body))
     }
 
     #[test]
@@ -265,7 +310,7 @@ mod tests {
 
         let config = test_config(&server.url());
         let mut client = test_client(config);
-        let result = client.get("/users/me", &HashMap::new()).unwrap();
+        let result = get_json(&mut client, "/users/me", &HashMap::new()).unwrap();
 
         assert_eq!(result["user"]["id"], 1);
         assert_eq!(result["user"]["name"], "Test");
@@ -289,7 +334,7 @@ mod tests {
         let mut client = test_client(config);
         let mut params = HashMap::new();
         params.insert("page_limit".to_string(), "10".to_string());
-        client.get("/organizations/5/members", &params).unwrap();
+        get_json(&mut client, "/organizations/5/members", &params).unwrap();
 
         mock.assert();
     }
@@ -307,7 +352,56 @@ mod tests {
         let config = test_config(&server.url());
         let mut client = test_client(config);
         let body = serde_json::json!({"name": "New"});
-        let result = client.post("/organizations/1/projects", &body).unwrap();
+        let result = post_json(&mut client, "/organizations/1/projects", &body).unwrap();
+
+        assert_eq!(result["project"]["id"], 99);
+        mock.assert();
+    }
+
+    #[test]
+    fn post_without_body_does_not_send_json_null() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/organizations/1/projects")
+            .match_header("content-type", mockito::Matcher::Missing)
+            .with_status(201)
+            .with_body(r#"{"project":{"id":99,"name":"New"}}"#)
+            .create();
+
+        let config = test_config(&server.url());
+        let mut client = test_client(config);
+        let result = client
+            .request_json("POST", "/organizations/1/projects", &HashMap::new(), None)
+            .unwrap();
+
+        assert_eq!(result["project"]["id"], 99);
+        mock.assert();
+    }
+
+    #[test]
+    fn post_with_explicit_null_body_sends_json_null() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/organizations/1/projects")
+            .match_header(
+                "content-type",
+                mockito::Matcher::Regex("application/json".to_string()),
+            )
+            .match_body("null")
+            .with_status(201)
+            .with_body(r#"{"project":{"id":99,"name":"New"}}"#)
+            .create();
+
+        let config = test_config(&server.url());
+        let mut client = test_client(config);
+        let result = client
+            .request_json(
+                "POST",
+                "/organizations/1/projects",
+                &HashMap::new(),
+                Some(&Value::Null),
+            )
+            .unwrap();
 
         assert_eq!(result["project"]["id"], 99);
         mock.assert();
@@ -325,8 +419,135 @@ mod tests {
         let config = test_config(&server.url());
         let mut client = test_client(config);
         let body = serde_json::json!({"members": [{"user_id": 1, "role": "remove"}]});
+        let result = put_json(&mut client, "/organizations/1/update_members", &body).unwrap();
+
+        assert_eq!(result["ok"], true);
+        mock.assert();
+    }
+
+    #[test]
+    fn patch_success_path_and_payload() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("PATCH", "/tasks/42")
+            .match_header("authorization", "Bearer test_token")
+            .match_header(
+                "content-type",
+                mockito::Matcher::Regex("application/json".to_string()),
+            )
+            .match_body(r#"{"status":"done"}"#)
+            .with_status(200)
+            .with_body(r#"{"ok":true}"#)
+            .create();
+
+        let config = test_config(&server.url());
+        let mut client = test_client(config);
+        let body = serde_json::json!({"status": "done"});
         let result = client
-            .put("/organizations/1/update_members", &body)
+            .request_json("PATCH", "/tasks/42", &HashMap::new(), Some(&body))
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+        mock.assert();
+    }
+
+    #[test]
+    fn post_with_query_params() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/organizations/1/projects")
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "include_archived".into(),
+                "true".into(),
+            )]))
+            .with_status(201)
+            .with_body(r#"{"project":{"id":99}}"#)
+            .create();
+
+        let config = test_config(&server.url());
+        let mut client = test_client(config);
+        let mut params = HashMap::new();
+        params.insert("include_archived".to_string(), "true".to_string());
+        let body = serde_json::json!({"name": "New"});
+        let result = client
+            .request_json("POST", "/organizations/1/projects", &params, Some(&body))
+            .unwrap();
+
+        assert_eq!(result["project"]["id"], 99);
+        mock.assert();
+    }
+
+    #[test]
+    fn put_with_query_params() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("PUT", "/organizations/1/update_members")
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "notify".into(),
+                "false".into(),
+            )]))
+            .with_status(200)
+            .with_body(r#"{"ok":true}"#)
+            .create();
+
+        let config = test_config(&server.url());
+        let mut client = test_client(config);
+        let mut params = HashMap::new();
+        params.insert("notify".to_string(), "false".to_string());
+        let body = serde_json::json!({"members": [{"user_id": 1, "role": "remove"}]});
+        let result = client
+            .request_json(
+                "PUT",
+                "/organizations/1/update_members",
+                &params,
+                Some(&body),
+            )
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+        mock.assert();
+    }
+
+    #[test]
+    fn patch_with_query_params() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("PATCH", "/tasks/42")
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "sync".into(),
+                "1".into(),
+            )]))
+            .with_status(200)
+            .with_body(r#"{"ok":true}"#)
+            .create();
+
+        let config = test_config(&server.url());
+        let mut client = test_client(config);
+        let mut params = HashMap::new();
+        params.insert("sync".to_string(), "1".to_string());
+        let body = serde_json::json!({"status": "done"});
+        let result = client
+            .request_json("PATCH", "/tasks/42", &params, Some(&body))
+            .unwrap();
+
+        assert_eq!(result["ok"], true);
+        mock.assert();
+    }
+
+    #[test]
+    fn patch_without_body_does_not_send_json_null() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("PATCH", "/tasks/42")
+            .match_header("content-type", mockito::Matcher::Missing)
+            .with_status(200)
+            .with_body(r#"{"ok":true}"#)
+            .create();
+
+        let config = test_config(&server.url());
+        let mut client = test_client(config);
+        let result = client
+            .request_json("PATCH", "/tasks/42", &HashMap::new(), None)
             .unwrap();
 
         assert_eq!(result["ok"], true);
@@ -343,9 +564,32 @@ mod tests {
 
         let config = test_config(&server.url());
         let mut client = test_client(config);
-        let result = client.delete("/invites/42").unwrap();
+        let result = delete_json(&mut client, "/invites/42").unwrap();
 
         assert!(result.is_null());
+        mock.assert();
+    }
+
+    #[test]
+    fn delete_with_body_sends_json() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("DELETE", "/invites/42")
+            .match_header(
+                "content-type",
+                mockito::Matcher::Regex("application/json".to_string()),
+            )
+            .match_body(r#"{"reason":"duplicate"}"#)
+            .with_status(200)
+            .with_body(r#"{"ok":true}"#)
+            .create();
+
+        let config = test_config(&server.url());
+        let mut client = test_client(config);
+        let body = serde_json::json!({"reason": "duplicate"});
+        let result = delete_json_with_body(&mut client, "/invites/42", &body).unwrap();
+
+        assert_eq!(result["ok"], true);
         mock.assert();
     }
 
@@ -360,7 +604,7 @@ mod tests {
 
         let config = test_config(&server.url());
         let mut client = test_client(config);
-        let err = client.get("/bad", &HashMap::new()).unwrap_err();
+        let err = get_json(&mut client, "/bad", &HashMap::new()).unwrap_err();
 
         match err {
             CliError::Api {
@@ -387,7 +631,7 @@ mod tests {
 
         let config = test_config(&server.url());
         let mut client = test_client(config);
-        let err = client.get("/missing", &HashMap::new()).unwrap_err();
+        let err = get_json(&mut client, "/missing", &HashMap::new()).unwrap_err();
 
         assert_eq!(err.exit_code(), 1);
     }
@@ -404,7 +648,7 @@ mod tests {
 
         let config = test_config(&server.url());
         let mut client = test_client(config);
-        let err = client.get("/limited", &HashMap::new()).unwrap_err();
+        let err = get_json(&mut client, "/limited", &HashMap::new()).unwrap_err();
 
         match err {
             CliError::Api {
@@ -431,7 +675,7 @@ mod tests {
 
         let config = test_config(&server.url());
         let mut client = test_client(config);
-        let err = client.get("/limited", &HashMap::new()).unwrap_err();
+        let err = get_json(&mut client, "/limited", &HashMap::new()).unwrap_err();
 
         match err {
             CliError::Api { message, .. } => assert!(message.contains("unknown")),
@@ -450,7 +694,7 @@ mod tests {
 
         let config = test_config(&server.url());
         let mut client = test_client(config);
-        let err = client.get("/html-error", &HashMap::new()).unwrap_err();
+        let err = get_json(&mut client, "/html-error", &HashMap::new()).unwrap_err();
 
         match err {
             CliError::Api {
@@ -470,7 +714,7 @@ mod tests {
     fn auth_error_no_token() {
         let config = Config::default(); // no token
         let mut client = test_client(config);
-        let err = client.get("/anything", &HashMap::new()).unwrap_err();
+        let err = get_json(&mut client, "/anything", &HashMap::new()).unwrap_err();
 
         assert_eq!(err.exit_code(), 2);
     }
@@ -489,23 +733,22 @@ mod tests {
             api_url: server.url(),
             ..Default::default()
         };
-        let mut client =
-            HubstaffClient::new_with_env_token(config, Some("bad_env_token".to_string())).unwrap();
-        let err = client.get("/protected", &HashMap::new()).unwrap_err();
+        let mut client = new_with_env_token(config, Some("bad_env_token".to_string())).unwrap();
+        let err = get_json(&mut client, "/protected", &HashMap::new()).unwrap_err();
 
         // Should tell user to check env var, not try refresh
         assert_eq!(err.exit_code(), 2);
     }
 
     #[test]
-    fn resolve_org_delegates_to_config() {
+    fn resolve_organization_delegates_to_config() {
         let config = Config {
-            org: Some(42),
+            organization: Some(42),
             ..Default::default()
         };
         let client = test_client(config);
-        assert_eq!(client.resolve_org(None).unwrap(), 42);
-        assert_eq!(client.resolve_org(Some(99)).unwrap(), 99);
+        assert_eq!(client.resolve_organization(None).unwrap(), 42);
+        assert_eq!(client.resolve_organization(Some(99)).unwrap(), 99);
     }
 
     #[test]
@@ -521,7 +764,7 @@ mod tests {
         let mut config = test_config(&server.url());
         config.auth.access_token = Some("my_secret_token".to_string());
         let mut client = test_client(config);
-        client.get("/test", &HashMap::new()).unwrap();
+        get_json(&mut client, "/test", &HashMap::new()).unwrap();
 
         mock.assert();
     }
@@ -536,8 +779,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let client =
-            HubstaffClient::new_with_env_token(config, Some("env_api_token".to_string())).unwrap();
+        let client = new_with_env_token(config, Some("env_api_token".to_string())).unwrap();
 
         assert!(!client.should_refresh_proactively(chrono::Utc::now()));
     }
@@ -587,7 +829,7 @@ mod tests {
         config.auth.refresh_token = Some("refresh_token".to_string());
         config.auth.expires_at = Some("not-a-timestamp".to_string());
         let mut client = test_client(config);
-        let result = client.get("/users/me", &HashMap::new()).unwrap();
+        let result = get_json(&mut client, "/users/me", &HashMap::new()).unwrap();
 
         assert_eq!(result["user"]["id"], 1);
         mock.assert();
@@ -603,7 +845,7 @@ mod tests {
         config.auth_url = "http://127.0.0.1:9".to_string();
 
         let mut client = test_client(config);
-        let err = client.get("/users/me", &HashMap::new()).unwrap_err();
+        let err = get_json(&mut client, "/users/me", &HashMap::new()).unwrap_err();
         match err {
             CliError::Network(message) => {
                 assert!(message.contains("Couldn't refresh your session right now"));

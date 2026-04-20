@@ -5,17 +5,20 @@ pub fn set(key: &str, value: &str) -> Result<(), CliError> {
     let mut config = Config::load()?;
 
     match key {
-        "org" => {
+        "organization" => {
             let id: u64 = value
                 .parse()
-                .map_err(|_| CliError::Config(format!("invalid org id: {value}")))?;
-            config.org = Some(id);
+                .map_err(|_| CliError::Config(format!("invalid organization id: {value}")))?;
+            config.organization = Some(id);
         }
         "api_url" => {
             config.api_url = value.to_string();
         }
         "auth_url" => {
             config.auth_url = value.to_string();
+        }
+        "schema_url" => {
+            config.schema_url = Some(value.to_string());
         }
         "token" => {
             config.auth.access_token = Some(value.to_string());
@@ -30,7 +33,7 @@ pub fn set(key: &str, value: &str) -> Result<(), CliError> {
         }
         _ => {
             return Err(CliError::Config(format!(
-                "unknown config key: {key}. Valid keys: org, api_url, auth_url, token, format"
+                "unknown config key: {key}. Valid keys: organization, api_url, auth_url, schema_url, token, format"
             )));
         }
     }
@@ -149,12 +152,16 @@ pub fn setup_oauth() -> Result<(), CliError> {
 
 pub fn show() -> Result<(), CliError> {
     let config = Config::load()?;
+
     println!("api_url = {}", config.api_url);
     if config.auth_url != "https://account.hubstaff.com" {
         println!("auth_url = {}", config.auth_url);
     }
-    if let Some(org) = config.org {
-        println!("org = {org}");
+    if let Some(organization_id) = config.organization {
+        println!("organization = {organization_id}");
+    }
+    if let Some(schema_url) = &config.schema_url {
+        println!("schema_url = {schema_url}");
     }
     println!("format = {}", config.format);
     println!();
