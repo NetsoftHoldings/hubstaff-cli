@@ -7,8 +7,8 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use url::Url;
 
-const PORT_START: u16 = 19876;
-const PORT_END: u16 = 19886;
+const CALLBACK_PORT: u16 = 19876;
+const CALLBACK_REDIRECT_URI: &str = "http://127.0.0.1:19876/callback";
 const CALLBACK_TIMEOUT_SECS: u64 = 120;
 const AUTH_HTTP_TIMEOUT_SECS: u64 = 10;
 const REFRESH_NETWORK_ERROR: &str =
@@ -23,7 +23,7 @@ fn client_id() -> Result<String, CliError> {
              \n\
              OAuth login requires a Hubstaff OAuth app. To set up:\n\
              1. Go to https://developer.hubstaff.com > OAuth Apps > Create\n\
-             2. Set redirect URI to http://localhost:19876/callback\n\
+             2. Set redirect URI to http://127.0.0.1:19876/callback\n\
              3. Copy the Client ID and Client Secret\n\
              4. Run:  hubstaff config setup-oauth\n\
              \n\
@@ -56,10 +56,10 @@ pub fn login() -> Result<(), CliError> {
 
     let (verifier, challenge) = generate_pkce();
     let state = generate_state();
-    let (server, port) = start_callback_server()?;
-    let redirect_uri = format!("http://localhost:{port}/callback");
+    let server = start_callback_server()?;
+    let redirect_uri = CALLBACK_REDIRECT_URI.to_string();
 
-    let auth_url = build_auth_url(auth_base, &id, &challenge, &redirect_uri, &state);
+    let auth_url = build_auth_url(auth_base, &id, &challenge, &redirect_uri, &state)?;
 
     println!("Opening browser for authentication...");
     println!("If the browser doesn't open, visit:\n{auth_url}");
@@ -72,9 +72,7 @@ pub fn login() -> Result<(), CliError> {
     let tokens = exchange_code(auth_base, &id, &secret, &code, &verifier, &redirect_uri)?;
 
     let mut config = Config::load()?;
-    config.auth.access_token = Some(tokens.access_token);
-    config.auth.refresh_token = Some(tokens.refresh_token);
-    config.auth.expires_at = Some(tokens.expires_at);
+    config.store_tokens(tokens);
     config.save()?;
 
     println!("Authentication successful. Tokens saved.");
@@ -129,30 +127,39 @@ fn refresh_token_with_credentials(
         .json()
         .map_err(|_| CliError::Auth(REFRESH_AUTH_ERROR.to_string()))?;
 
-    let new_access = body["access_token"]
-        .as_str()
-        .ok_or_else(|| CliError::Auth(REFRESH_AUTH_ERROR.to_string()))?
-        .to_string();
-    let new_refresh = body["refresh_token"]
-        .as_str()
-        .ok_or_else(|| CliError::Auth(REFRESH_AUTH_ERROR.to_string()))?
-        .to_string();
-
-    config.auth.access_token = Some(new_access);
-    config.auth.refresh_token = Some(new_refresh);
-    if let Some(expires_in) = body["expires_in"].as_i64() {
-        let expires_at = chrono::Utc::now() + chrono::Duration::seconds(expires_in);
-        config.auth.expires_at = Some(expires_at.to_rfc3339());
-    }
+    let tokens =
+        TokenSet::from_json(&body).map_err(|_| CliError::Auth(REFRESH_AUTH_ERROR.to_string()))?;
+    config.store_tokens(tokens);
     config.save()?;
 
     Ok(())
 }
 
-struct TokenResponse {
-    access_token: String,
-    refresh_token: String,
-    expires_at: String,
+pub struct TokenSet {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: Option<String>,
+}
+
+impl TokenSet {
+    pub fn from_json(body: &serde_json::Value) -> Result<Self, CliError> {
+        let access_token = body["access_token"]
+            .as_str()
+            .ok_or_else(|| CliError::Auth("missing access_token in response".into()))?
+            .to_string();
+        let refresh_token = body["refresh_token"]
+            .as_str()
+            .ok_or_else(|| CliError::Auth("missing refresh_token in response".into()))?
+            .to_string();
+        let expires_at = body["expires_in"]
+            .as_i64()
+            .map(|secs| (chrono::Utc::now() + chrono::Duration::seconds(secs)).to_rfc3339());
+        Ok(Self {
+            access_token,
+            refresh_token,
+            expires_at,
+        })
+    }
 }
 
 fn generate_pkce() -> (String, String) {
@@ -185,9 +192,10 @@ fn build_auth_url(
     challenge: &str,
     redirect_uri: &str,
     state: &str,
-) -> String {
+) -> Result<String, CliError> {
     let nonce = generate_nonce();
-    let mut url = Url::parse(&format!("{auth_base}/authorizations/new")).unwrap();
+    let mut url = Url::parse(&format!("{auth_base}/authorizations/new"))
+        .map_err(|e| CliError::Config(format!("invalid auth_url '{auth_base}': {e}")))?;
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", client_id)
@@ -197,18 +205,15 @@ fn build_auth_url(
         .append_pair("code_challenge_method", "S256")
         .append_pair("state", state)
         .append_pair("nonce", &nonce);
-    url.to_string()
+    Ok(url.to_string())
 }
 
-fn start_callback_server() -> Result<(tiny_http::Server, u16), CliError> {
-    for port in PORT_START..=PORT_END {
-        if let Ok(server) = tiny_http::Server::http(format!("127.0.0.1:{port}")) {
-            return Ok((server, port));
-        }
-    }
-    Err(CliError::Auth(format!(
-        "could not bind to any port in range {PORT_START}-{PORT_END}"
-    )))
+fn start_callback_server() -> Result<tiny_http::Server, CliError> {
+    tiny_http::Server::http(format!("127.0.0.1:{CALLBACK_PORT}")).map_err(|_| {
+        CliError::Auth(format!(
+            "could not bind to 127.0.0.1:{CALLBACK_PORT}. Free that port and try again. Your Hubstaff OAuth app redirect URI must be set to {CALLBACK_REDIRECT_URI}"
+        ))
+    })
 }
 
 fn wait_for_callback(server: &tiny_http::Server, expected_state: &str) -> Result<String, CliError> {
@@ -296,7 +301,7 @@ fn exchange_code(
     code: &str,
     verifier: &str,
     redirect_uri: &str,
-) -> Result<TokenResponse, CliError> {
+) -> Result<TokenSet, CliError> {
     let client = reqwest::blocking::Client::new();
     let resp = client
         .post(format!("{auth_base}/access_tokens"))
@@ -322,28 +327,7 @@ fn exchange_code(
         .json()
         .map_err(|e| CliError::Auth(format!("failed to parse token response: {e}")))?;
 
-    let access_token = body["access_token"]
-        .as_str()
-        .ok_or_else(|| CliError::Auth("missing access_token in response".to_string()))?
-        .to_string();
-
-    let refresh_token = body["refresh_token"]
-        .as_str()
-        .ok_or_else(|| CliError::Auth("missing refresh_token in response".to_string()))?
-        .to_string();
-
-    let expires_at = if let Some(expires_in) = body["expires_in"].as_i64() {
-        let at = chrono::Utc::now() + chrono::Duration::seconds(expires_in);
-        at.to_rfc3339()
-    } else {
-        String::new()
-    };
-
-    Ok(TokenResponse {
-        access_token,
-        refresh_token,
-        expires_at,
-    })
+    TokenSet::from_json(&body)
 }
 
 #[cfg(test)]
@@ -437,9 +421,10 @@ mod tests {
             "https://account.hubstaff.com",
             "test_client_id",
             "test_challenge",
-            "http://localhost:19876/callback",
+            CALLBACK_REDIRECT_URI,
             "test_state",
-        );
+        )
+        .unwrap();
         assert!(url.contains("response_type=code"));
         assert!(url.contains("client_id=test_client_id"));
         assert!(url.contains("redirect_uri="));
@@ -456,10 +441,18 @@ mod tests {
             "https://account.staging.hbstf.co",
             "test_id",
             "ch",
-            "http://localhost:19876/callback",
+            CALLBACK_REDIRECT_URI,
             "st",
-        );
+        )
+        .unwrap();
         assert!(url.starts_with("https://account.staging.hbstf.co/authorizations/new"));
+    }
+
+    #[test]
+    fn auth_url_errors_on_malformed_base() {
+        let err =
+            build_auth_url("not a url", "test_id", "ch", CALLBACK_REDIRECT_URI, "st").unwrap_err();
+        assert!(matches!(err, CliError::Config(_)));
     }
 
     #[test]
@@ -490,8 +483,7 @@ mod tests {
     fn callback_server_binds_to_port() {
         let result = start_callback_server();
         assert!(result.is_ok());
-        let (_, port) = result.unwrap();
-        assert!((PORT_START..=PORT_END).contains(&port));
+        drop(result.unwrap());
     }
 
     #[test]

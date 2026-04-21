@@ -11,6 +11,7 @@ pub fn run_dynamic(
     schema: &ApiSchema,
     args: &[String],
     pretty_json: bool,
+    organization_override: Option<u64>,
 ) -> Result<(), CliError> {
     let index = CommandIndex::load_or_build(schema)?;
     let parsed = ParsedInvocation::parse(args)?;
@@ -63,7 +64,13 @@ pub fn run_dynamic(
         "query options",
     )?;
 
-    fill_defaults_from_config(operation, client, &mut path_values, &mut query_values)?;
+    fill_defaults_from_config(
+        operation,
+        client,
+        organization_override,
+        &mut path_values,
+        &mut query_values,
+    )?;
     validate_required_parameters(operation, &path_values, &query_values)?;
     validate_enum_values(operation, &path_values, ParameterLocation::Path)?;
     validate_enum_values(operation, &query_values, ParameterLocation::Query)?;
@@ -632,6 +639,7 @@ fn validate_known_values(
 fn fill_defaults_from_config(
     operation: &Operation,
     client: &HubstaffClient,
+    organization_override: Option<u64>,
     path_values: &mut HashMap<String, String>,
     query_values: &mut HashMap<String, String>,
 ) -> Result<(), CliError> {
@@ -654,7 +662,9 @@ fn fill_defaults_from_config(
             continue;
         }
 
-        let organization_id = client.resolve_organization(None)?.to_string();
+        let organization_id = client
+            .resolve_organization(organization_override)?
+            .to_string();
         match parameter.location {
             ParameterLocation::Path => {
                 path_values.insert("organization_id".to_string(), organization_id);

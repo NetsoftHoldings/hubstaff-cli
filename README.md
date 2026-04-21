@@ -41,7 +41,8 @@ hubstaff config setup-oauth
 This will prompt you for a Client ID and Client Secret. To get those:
 
 1. Go to [developer.hubstaff.com](https://developer.hubstaff.com) > OAuth Apps > Create
-2. Set the redirect URI to `http://localhost:19876/callback`
+2. Set the redirect URI to `http://127.0.0.1:19876/callback`
+   This must match exactly, and port `19876` must be free when you run `hubstaff login`.
 3. Copy the Client ID and Client Secret
 
 Then authenticate:
@@ -127,6 +128,9 @@ hubstaff config set auth_url URL
 hubstaff config set schema_url URL
 hubstaff config set token TOKEN
 hubstaff config set format compact
+hubstaff config unset organization
+hubstaff config unset schema_url
+hubstaff config reset
 hubstaff config set-pat TOKEN
 hubstaff config setup-oauth
 hubstaff config show
@@ -154,7 +158,7 @@ On macOS this is typically:
 - `~/Library/Application Support/hubstaff/schema/v2/docs.json`
 - `~/Library/Application Support/hubstaff/schema/v2/meta.toml`
 
-## Staging / Custom Environments
+## Custom Environment
 
 ```bash
 hubstaff config set api_url <api_url>

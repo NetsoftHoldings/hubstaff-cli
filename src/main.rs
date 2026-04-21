@@ -5,7 +5,7 @@ mod command_index;
 mod config;
 mod config_commands;
 mod error;
-mod login;
+mod persistence;
 mod schema;
 
 use clap::{Parser, Subcommand};
@@ -25,6 +25,10 @@ struct Cli {
     /// Output full JSON instead of compact format
     #[arg(long, global = true)]
     json: bool,
+
+    /// Override the default organization for this invocation
+    #[arg(long, global = true)]
+    organization: Option<u64>,
 }
 
 #[derive(Subcommand)]
@@ -51,6 +55,10 @@ enum Commands {
 enum ConfigAction {
     /// Set a config value (keys: organization, api_url, auth_url, schema_url, token, format)
     Set { key: String, value: String },
+    /// Unset a config value and restore its default (keys: organization, api_url, auth_url, schema_url, format)
+    Unset { key: String },
+    /// Reset all non-auth config values to defaults (does not clear tokens; use 'hubstaff logout')
+    Reset,
     /// Authenticate with a personal access token (exchanges it automatically)
     SetPat {
         /// Your personal access token from developer.hubstaff.com
@@ -93,12 +101,14 @@ fn run(cli: &Cli) -> Result<(), error::CliError> {
     match &cli.command {
         Commands::Config { action } => match action {
             ConfigAction::Set { key, value } => config_commands::set(key, value),
+            ConfigAction::Unset { key } => config_commands::unset(key),
+            ConfigAction::Reset => config_commands::reset(),
             ConfigAction::SetPat { token } => config_commands::set_pat(token),
             ConfigAction::SetupOauth => config_commands::setup_oauth(),
             ConfigAction::Show => config_commands::show(),
         },
-        Commands::Login => login::login(),
-        Commands::Logout => login::logout(),
+        Commands::Login => auth::login(),
+        Commands::Logout => auth::logout(),
         Commands::Schema { action } => {
             let cfg = config::Config::load()?;
             match action {
@@ -118,7 +128,7 @@ fn run(cli: &Cli) -> Result<(), error::CliError> {
             let cfg = config::Config::load()?;
             let schema = schema::ApiSchema::load(&cfg)?;
             let mut client = HubstaffClient::new(cfg)?;
-            api::run_dynamic(&mut client, &schema, args, cli.json)
+            api::run_dynamic(&mut client, &schema, args, cli.json, cli.organization)
         }
     }
 }

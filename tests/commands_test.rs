@@ -7,6 +7,10 @@ mod helpers {
         PathBuf::from(env!("CARGO_BIN_EXE_hubstaff"))
     }
 
+    pub fn temp_xdg() -> tempfile::TempDir {
+        tempfile::TempDir::new().expect("failed to create temp XDG dir")
+    }
+
     pub fn run(args: &[&str], xdg_dir: &str) -> (String, String, i32) {
         let mut cmd = std::process::Command::new(cli_bin());
         cmd.args(args);
@@ -81,27 +85,27 @@ mod helpers {
 
 #[test]
 fn cli_version() {
-    let (stdout, _, code) = helpers::run(&["--version"], "/tmp/hcli-test-ver");
+    let xdg = helpers::temp_xdg();
+    let (stdout, _, code) = helpers::run(&["--version"], xdg.path().to_str().unwrap());
     assert_eq!(code, 0);
     assert!(stdout.contains("hubstaff"));
-    let _ = std::fs::remove_dir_all("/tmp/hcli-test-ver");
 }
 
 #[test]
 fn cli_help_lists_hardcoded_commands() {
-    let (stdout, _, code) = helpers::run(&["--help"], "/tmp/hcli-test-help");
+    let xdg = helpers::temp_xdg();
+    let (stdout, _, code) = helpers::run(&["--help"], xdg.path().to_str().unwrap());
     assert_eq!(code, 0);
     for cmd in ["schema", "config", "login", "logout"] {
         assert!(stdout.contains(cmd), "missing command: {cmd}");
     }
     assert!(!stdout.contains("api"));
-    let _ = std::fs::remove_dir_all("/tmp/hcli-test-help");
 }
 
 #[test]
 fn cli_config_set_and_show() {
-    let dir = "/tmp/hcli-test-cfg";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
 
     // Set organization
     let (stdout, _, code) = helpers::run(&["config", "set", "organization", "42"], dir);
@@ -143,38 +147,32 @@ fn cli_config_set_and_show() {
     let (stdout, _, code) = helpers::run(&["config", "show"], dir);
     assert_eq!(code, 0);
     assert!(stdout.contains("auth_url = https://account.staging.hbstf.co"));
-
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn cli_config_set_invalid_key() {
-    let dir = "/tmp/hcli-test-cfg-inv";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
 
     let (_, stderr, code) = helpers::run(&["config", "set", "bad_key", "val"], dir);
     assert_eq!(code, 3);
     assert!(stderr.contains("unknown config key"));
-
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn cli_config_set_invalid_format() {
-    let dir = "/tmp/hcli-test-cfg-fmt";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
 
     let (_, stderr, code) = helpers::run(&["config", "set", "format", "xml"], dir);
     assert_eq!(code, 3);
     assert!(stderr.contains("compact"));
-
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn cli_config_explicit_default_schema_url_is_preserved_with_custom_api_url() {
-    let dir = "/tmp/hcli-test-schema-url-explicit-default";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
 
     let (stdout, _, code) = helpers::run(
         &[
@@ -208,14 +206,139 @@ fn cli_config_explicit_default_schema_url_is_preserved_with_custom_api_url() {
         !stdout.contains("schema_url = https://staging.api.hubstaff.com/v2/docs"),
         "schema_url should stay on the explicit override"
     );
+}
 
-    let _ = std::fs::remove_dir_all(dir);
+#[test]
+fn cli_config_set_token_clears_oauth_refresh_state() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    let cfg_dir = xdg.path().join("hubstaff");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(
+        cfg_dir.join("config.toml"),
+        "[auth]\naccess_token = \"old_access\"\nrefresh_token = \"old_refresh\"\nexpires_at = \"2099-01-01T00:00:00Z\"\n",
+    )
+    .unwrap();
+
+    let (_, _, code) = helpers::run(&["config", "set", "token", "raw_pat"], dir);
+    assert_eq!(code, 0);
+
+    let content = std::fs::read_to_string(cfg_dir.join("config.toml")).unwrap();
+    assert!(content.contains("access_token"));
+    assert!(
+        !content.contains("refresh_token"),
+        "refresh_token should be cleared when setting raw token; got: {content}"
+    );
+    assert!(
+        !content.contains("expires_at"),
+        "expires_at should be cleared when setting raw token; got: {content}"
+    );
+}
+
+#[test]
+fn cli_config_unset_restores_api_url_default() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    let (_, _, code) = helpers::run(
+        &[
+            "config",
+            "set",
+            "api_url",
+            "https://staging.api.hubstaff.com/v2",
+        ],
+        dir,
+    );
+    assert_eq!(code, 0);
+
+    let (stdout, _, code) = helpers::run(&["config", "unset", "api_url"], dir);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("unset api_url"));
+
+    let (stdout, _, code) = helpers::run(&["config", "show"], dir);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("api_url = https://api.hubstaff.com/v2"));
+}
+
+#[test]
+fn cli_config_unset_organization_clears_option() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    let (_, _, code) = helpers::run(&["config", "set", "organization", "42"], dir);
+    assert_eq!(code, 0);
+
+    let (stdout, _, code) = helpers::run(&["config", "unset", "organization"], dir);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("unset organization"));
+
+    let (stdout, _, code) = helpers::run(&["config", "show"], dir);
+    assert_eq!(code, 0);
+    assert!(!stdout.contains("organization = "));
+}
+
+#[test]
+fn cli_config_unset_token_rejected() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    let (_, stderr, code) = helpers::run(&["config", "unset", "token"], dir);
+    assert_eq!(code, 3);
+    assert!(stderr.contains("hubstaff logout"));
+}
+
+#[test]
+fn cli_config_unset_unknown_key() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    let (_, stderr, code) = helpers::run(&["config", "unset", "bogus"], dir);
+    assert_eq!(code, 3);
+    assert!(stderr.contains("unknown config key"));
+}
+
+#[test]
+fn cli_config_reset_restores_defaults_and_preserves_auth() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    helpers::run(&["config", "set", "organization", "42"], dir);
+    helpers::run(
+        &["config", "set", "api_url", "https://custom.example/v2"],
+        dir,
+    );
+    helpers::run(&["config", "set", "auth_url", "https://auth.example"], dir);
+    helpers::run(
+        &[
+            "config",
+            "set",
+            "schema_url",
+            "https://custom.example/v2/docs",
+        ],
+        dir,
+    );
+    helpers::run(&["config", "set", "format", "json"], dir);
+    helpers::run(&["config", "set", "token", "secret"], dir);
+
+    let (stdout, _, code) = helpers::run(&["config", "reset"], dir);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("Config reset to defaults"));
+
+    let (stdout, _, code) = helpers::run(&["config", "show"], dir);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("api_url = https://api.hubstaff.com/v2"));
+    assert!(!stdout.contains("auth_url = "));
+    assert!(!stdout.contains("organization = "));
+    assert!(!stdout.contains("schema_url = "));
+    assert!(stdout.contains("format = compact"));
+    assert!(stdout.contains("access_token = ****"));
 }
 
 #[test]
 fn cli_logout_clears_tokens() {
-    let dir = "/tmp/hcli-test-logout";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
 
     helpers::run(&["config", "set", "token", "mytoken"], dir);
     let (stdout, _, code) = helpers::run(&["logout"], dir);
@@ -224,14 +347,12 @@ fn cli_logout_clears_tokens() {
 
     let (stdout, _, _) = helpers::run(&["config", "show"], dir);
     assert!(stdout.contains("not configured"));
-
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn dynamic_projects_list_uses_schema_mapping() {
-    let dir = "/tmp/hcli-test-dynamic-projects";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
     let schema_source = "http://127.0.0.1:1/docs";
     helpers::seed_schema_cache_with_source_url(dir, schema_source);
 
@@ -258,7 +379,7 @@ fn dynamic_projects_list_uses_schema_mapping() {
     assert_eq!(code, 0, "stderr={stderr}");
     assert!(stdout.contains("\"projects\":[]"));
     assert!(
-        std::path::Path::new(dir)
+        xdg.path()
             .join("hubstaff")
             .join("schema")
             .join("v2")
@@ -267,13 +388,41 @@ fn dynamic_projects_list_uses_schema_mapping() {
     );
 
     mock.assert();
-    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn dynamic_projects_list_prefers_global_organization_override() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+    let schema_source = "http://127.0.0.1:1/docs";
+    helpers::seed_schema_cache_with_source_url(dir, schema_source);
+
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", "/organizations/9/projects")
+        .match_header("authorization", "Bearer test_token")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"projects":[{"id":1}]}"#)
+        .create();
+
+    let api_url = server.url();
+    let _ = helpers::run(&["config", "set", "api_url", &api_url], dir);
+    let _ = helpers::run(&["config", "set", "schema_url", schema_source], dir);
+    let _ = helpers::run(&["config", "set", "organization", "7"], dir);
+    let _ = helpers::run(&["config", "set", "token", "test_token"], dir);
+
+    let (stdout, stderr, code) = helpers::run(&["--organization", "9", "projects", "list"], dir);
+    assert_eq!(code, 0, "stderr={stderr}");
+    assert!(stdout.contains(r#""projects":[{"id":1}]"#));
+
+    mock.assert();
 }
 
 #[test]
 fn dynamic_nonstandard_action_uses_literal_segment() {
-    let dir = "/tmp/hcli-test-dynamic-nonstandard";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
     let schema_source = "http://127.0.0.1:1/docs";
     helpers::seed_schema_cache_with_source_url(dir, schema_source);
 
@@ -296,13 +445,12 @@ fn dynamic_nonstandard_action_uses_literal_segment() {
     assert!(stdout.contains("\"ok\":true"));
 
     mock.assert();
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn dynamic_command_does_not_use_cache_when_source_url_mismatches_effective_schema_url() {
-    let dir = "/tmp/hcli-test-schema-cache-mismatch";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
     helpers::seed_schema_cache(dir);
 
     let (stdout, _, code) = helpers::run(&["config", "set", "api_url", "http://127.0.0.1:1"], dir);
@@ -315,20 +463,16 @@ fn dynamic_command_does_not_use_cache_when_source_url_mismatches_effective_schem
         stderr.contains("schema fetch failed"),
         "expected refresh failure, got stderr={stderr}"
     );
-
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn dynamic_command_uses_cache_when_source_url_matches_effective_schema_url() {
-    use std::path::Path;
-
-    let dir = "/tmp/hcli-test-schema-cache-match";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
     helpers::seed_schema_cache(dir);
 
     let schema_source = "http://127.0.0.1:1/docs";
-    let schema_dir = Path::new(dir).join("hubstaff").join("schema").join("v2");
+    let schema_dir = xdg.path().join("hubstaff").join("schema").join("v2");
     let meta = format!(
         "fetched_at = \"2099-01-01T00:00:00Z\"\netag = \"test\"\nsource_url = \"{schema_source}\"\n"
     );
@@ -353,18 +497,16 @@ fn dynamic_command_uses_cache_when_source_url_matches_effective_schema_url() {
     assert!(stdout.contains("\"id\":1"));
 
     mock.assert();
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn schema_show_is_read_only_for_cache_meta() {
-    use std::path::Path;
-
-    let dir = "/tmp/hcli-test-schema-show-readonly";
-    let _ = std::fs::remove_dir_all(dir);
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
     helpers::seed_schema_cache(dir);
 
-    let meta_path = Path::new(dir)
+    let meta_path = xdg
+        .path()
         .join("hubstaff")
         .join("schema")
         .join("v2")
@@ -376,6 +518,4 @@ fn schema_show_is_read_only_for_cache_meta() {
 
     let after = std::fs::read_to_string(&meta_path).expect("failed to read meta after show");
     assert_eq!(before, after, "schema show should not mutate cache meta");
-
-    let _ = std::fs::remove_dir_all(dir);
 }

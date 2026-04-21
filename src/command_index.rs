@@ -1,11 +1,11 @@
 use crate::config::Config;
 use crate::error::CliError;
+use crate::persistence::write_atomic;
 use crate::schema::{ApiSchema, Operation};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
 
 const INDEX_VERSION: u32 = 1;
 
@@ -414,20 +414,6 @@ fn write_cache(cache: &CommandIndexCache) -> Result<(), CliError> {
     write_atomic(&Config::schema_command_index_path(), &content)
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
-    let temp_path = path.with_extension("tmp");
-    fs::write(&temp_path, bytes)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))?;
-    }
-
-    fs::rename(&temp_path, path)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,6 +444,37 @@ mod tests {
         let entry = build_entry(&op("x", "PUT", "/teams/{team_id}/update_members")).unwrap();
         assert_eq!(entry.command_words, vec!["teams", "update_members"]);
         assert_eq!(entry.visible_path_params, vec!["team_id"]);
+    }
+
+    // Snapshot of the full command table built from the committed live schema.
+    // Refresh via `just refresh-schema-fixture` when the API evolves; the diff
+    // on this snapshot is the review surface for command-shape drift.
+    #[test]
+    fn schema_command_table_snapshot() {
+        use crate::schema::{ApiSchema, SchemaSource};
+        use serde_json::Value;
+
+        let raw = include_str!("../tests/fixtures/schema.json");
+        let value: Value = serde_json::from_str(raw).expect("fixture is valid JSON");
+        let schema = ApiSchema::from_schema(&value, SchemaSource::Cache, None)
+            .expect("fixture parses into ApiSchema");
+
+        let entries = build_entries(&schema);
+        let mut lines = entries
+            .iter()
+            .map(|entry| {
+                format!(
+                    "{:6} {:60} -> {}",
+                    entry.method,
+                    entry.path_template,
+                    usage_line(entry)
+                )
+            })
+            .collect::<Vec<_>>();
+        lines.sort();
+        let table = lines.join("\n");
+
+        insta::assert_snapshot!(table);
     }
 
     fn entry(words: &[&str], ids: &[&str], method: &str, op_id: &str) -> CommandEntry {

@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::error::CliError;
+use crate::persistence::write_atomic;
 use chrono::Utc;
 use reqwest::blocking::Client;
 use reqwest::header::{ETAG, IF_NONE_MATCH};
@@ -8,7 +9,6 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 use std::time::Duration as StdDuration;
 
 const DEFAULT_SCHEMA_TIMEOUT_SECS: u64 = 10;
@@ -186,7 +186,7 @@ impl ApiSchema {
             .and_then(|index| self.operations.get(*index))
     }
 
-    fn from_schema(
+    pub(crate) fn from_schema(
         schema: &Value,
         source: SchemaSource,
         cache_meta: Option<SchemaCacheMeta>,
@@ -624,20 +624,6 @@ fn hash_schema_json(schema: &Value) -> Result<String, CliError> {
 fn write_meta(meta: &SchemaCacheMeta) -> Result<(), CliError> {
     let content = toml::to_string_pretty(meta)?;
     write_atomic(&Config::schema_meta_path(), content.as_bytes())
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), CliError> {
-    let temp_path = path.with_extension("tmp");
-    fs::write(&temp_path, bytes)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))?;
-    }
-
-    fs::rename(&temp_path, path)?;
-    Ok(())
 }
 
 #[cfg(test)]

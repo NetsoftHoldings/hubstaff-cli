@@ -1,0 +1,143 @@
+---
+source: src/command_index.rs
+assertion_line: 477
+expression: table
+---
+DELETE /insights/smart_notification_rules/{rule_id}                 -> insights smart_notification_rules <rule_id>
+DELETE /invites/{invite_id}                                         -> invites delete <invite_id>
+DELETE /organizations/{organization_id}/global_todos/{id}           -> global_todos delete <id>
+DELETE /tasks/{task_id}                                             -> tasks delete <task_id>
+DELETE /teams/{team_id}                                             -> teams delete <team_id>
+DELETE /time_off_policies/{time_off_policy_id}                      -> time_off_policies delete <time_off_policy_id>
+DELETE /time_off_requests/{time_off_request_id}                     -> time_off_requests delete <time_off_request_id>
+DELETE /webhooks/{webhook_id}                                       -> webhooks delete <webhook_id>
+GET    /budget_histories/{budget_history_id}                        -> budget_histories get <budget_history_id>
+GET    /clients/{client_id}                                         -> clients get <client_id>
+GET    /clients/{client_id}/budget_histories                        -> clients budget_histories list <client_id>
+GET    /error_codes                                                 -> error_codes list
+GET    /insights/smart_notification_rules/{rule_id}                 -> insights smart_notification_rules <rule_id>
+GET    /integrations/{integration_id}/project_links                 -> integrations project_links list <integration_id>
+GET    /integrations/{integration_id}/tasks                         -> integrations tasks list <integration_id>
+GET    /integrations/{integration_id}/user_links                    -> integrations user_links list <integration_id>
+GET    /invites/{invite_id}                                         -> invites get <invite_id>
+GET    /job_sites/{job_site_id}                                     -> job_sites get <job_site_id>
+GET    /limit_histories/{limit_history_id}                          -> limit_histories get <limit_history_id>
+GET    /notes/{note_id}                                             -> notes get <note_id>
+GET    /organizations                                               -> organizations list
+GET    /organizations/{organization_id}                             -> organizations get
+GET    /organizations/{organization_id}/activities                  -> activities list
+GET    /organizations/{organization_id}/activities/daily            -> activities daily
+GET    /organizations/{organization_id}/activities/daily/updates    -> activities daily updates
+GET    /organizations/{organization_id}/activities/updates          -> activities updates
+GET    /organizations/{organization_id}/attendance_schedules        -> attendance_schedules list
+GET    /organizations/{organization_id}/attendance_shifts           -> attendance_shifts list
+GET    /organizations/{organization_id}/budget_histories            -> budget_histories list
+GET    /organizations/{organization_id}/client_invoices             -> client_invoices list
+GET    /organizations/{organization_id}/clients                     -> clients list
+GET    /organizations/{organization_id}/global_todos                -> global_todos list
+GET    /organizations/{organization_id}/holidays                    -> holidays list
+GET    /organizations/{organization_id}/insights/smart_notification_rules -> insights smart_notification_rules
+GET    /organizations/{organization_id}/insights/smart_notifications -> insights smart_notifications
+GET    /organizations/{organization_id}/insights/unusual_activities -> insights unusual_activities
+GET    /organizations/{organization_id}/integrations                -> integrations list
+GET    /organizations/{organization_id}/invites                     -> invites list
+GET    /organizations/{organization_id}/job_site_visits             -> job_site_visits list
+GET    /organizations/{organization_id}/job_sites                   -> job_sites list
+GET    /organizations/{organization_id}/last_activities             -> last_activities list
+GET    /organizations/{organization_id}/limit_histories             -> limit_histories list
+GET    /organizations/{organization_id}/locations                   -> locations list
+GET    /organizations/{organization_id}/members                     -> members list
+GET    /organizations/{organization_id}/notes                       -> notes list
+GET    /organizations/{organization_id}/passive_job_site_visits     -> passive_job_site_visits list
+GET    /organizations/{organization_id}/projects                    -> projects list
+GET    /organizations/{organization_id}/rates                       -> rates list
+GET    /organizations/{organization_id}/screenshots                 -> screenshots list
+GET    /organizations/{organization_id}/screenshots/{screenshot_id} -> screenshots get <screenshot_id>
+GET    /organizations/{organization_id}/seats                       -> seats list
+GET    /organizations/{organization_id}/tasks                       -> tasks list
+GET    /organizations/{organization_id}/team_invoices               -> team_invoices list
+GET    /organizations/{organization_id}/team_payments               -> team_payments list
+GET    /organizations/{organization_id}/teams                       -> teams list
+GET    /organizations/{organization_id}/time_edit_logs              -> time_edit_logs list
+GET    /organizations/{organization_id}/time_off_balances           -> time_off_balances list
+GET    /organizations/{organization_id}/time_off_policies           -> time_off_policies list
+GET    /organizations/{organization_id}/time_off_policies/user_policies -> time_off_policies user_policies
+GET    /organizations/{organization_id}/time_off_requests           -> time_off_requests list
+GET    /organizations/{organization_id}/timesheets                  -> timesheets list
+GET    /organizations/{organization_id}/tool_usages                 -> tool_usages list
+GET    /organizations/{organization_id}/tool_usages/daily           -> tool_usages daily
+GET    /organizations/{organization_id}/work_break_projects         -> work_break_projects list
+GET    /projects/{project_id}                                       -> projects get <project_id>
+GET    /projects/{project_id}/activities                            -> projects activities list <project_id>
+GET    /projects/{project_id}/activities/daily                      -> projects activities daily <project_id>
+GET    /projects/{project_id}/activities/daily/updates              -> projects activities daily updates <project_id>
+GET    /projects/{project_id}/activities/updates                    -> projects activities updates <project_id>
+GET    /projects/{project_id}/budget_histories                      -> projects budget_histories list <project_id>
+GET    /projects/{project_id}/integration_links                     -> projects integration_links list <project_id>
+GET    /projects/{project_id}/last_activities                       -> projects last_activities list <project_id>
+GET    /projects/{project_id}/locations                             -> projects locations list <project_id>
+GET    /projects/{project_id}/members                               -> projects members list <project_id>
+GET    /projects/{project_id}/notes                                 -> projects notes list <project_id>
+GET    /projects/{project_id}/screenshots                           -> projects screenshots list <project_id>
+GET    /projects/{project_id}/screenshots/{screenshot_id}           -> projects screenshots get <project_id> <screenshot_id>
+GET    /projects/{project_id}/tasks                                 -> projects tasks list <project_id>
+GET    /projects/{project_id}/time_edit_logs                        -> projects time_edit_logs list <project_id>
+GET    /projects/{project_id}/tool_usages                           -> projects tool_usages list <project_id>
+GET    /projects/{project_id}/tool_usages/daily                     -> projects tool_usages daily <project_id>
+GET    /tasks/{task_id}                                             -> tasks get <task_id>
+GET    /team_payments/{team_payment_id}                             -> team_payments get <team_payment_id>
+GET    /teams/{team_id}                                             -> teams get <team_id>
+GET    /teams/{team_id}/members                                     -> teams members list <team_id>
+GET    /teams/{team_id}/projects                                    -> teams projects list <team_id>
+GET    /time_off_policies/{time_off_policy_id}                      -> time_off_policies get <time_off_policy_id>
+GET    /time_off_requests/{time_off_request_id}                     -> time_off_requests get <time_off_request_id>
+GET    /users/me                                                    -> users me
+GET    /users/{user_id}                                             -> users get <user_id>
+GET    /webhooks/{webhook_id}                                       -> webhooks get <webhook_id>
+PATCH  /insights/smart_notification_rules/{rule_id}/toggle_status   -> insights smart_notification_rules toggle_status <rule_id>
+POST   /organizations                                               -> organizations create
+POST   /organizations/{organization_id}/attendance_schedules        -> attendance_schedules create
+POST   /organizations/{organization_id}/clients                     -> clients create
+POST   /organizations/{organization_id}/global_todos                -> global_todos create
+POST   /organizations/{organization_id}/insights/smart_notification_rules -> insights smart_notification_rules
+POST   /organizations/{organization_id}/invites                     -> invites create
+POST   /organizations/{organization_id}/invites/bulk                -> invites bulk
+POST   /organizations/{organization_id}/job_sites                   -> job_sites create
+POST   /organizations/{organization_id}/members                     -> members create
+POST   /organizations/{organization_id}/projects                    -> projects create
+POST   /organizations/{organization_id}/teams                       -> teams create
+POST   /organizations/{organization_id}/time_off_balances           -> time_off_balances create
+POST   /organizations/{organization_id}/time_off_policies           -> time_off_policies create
+POST   /organizations/{organization_id}/time_off_requests           -> time_off_requests create
+POST   /organizations/{organization_id}/webhooks                    -> webhooks create
+POST   /projects/{project_id}/tasks                                 -> projects tasks create <project_id>
+POST   /projects/{project_id}/webhooks                              -> projects webhooks create <project_id>
+POST   /time_off_policies/{time_off_policy_id}/archive              -> time_off_policies archive create <time_off_policy_id>
+POST   /time_off_policies/{time_off_policy_id}/restore              -> time_off_policies restore create <time_off_policy_id>
+POST   /users/me/webhooks                                           -> users me webhooks
+POST   /users/{user_id}/time_entries                                -> users time_entries create <user_id>
+POST   /webhooks/{webhook_id}/activate                              -> webhooks activate create <webhook_id>
+PUT    /attendance_schedules/{attendance_schedule_id}               -> attendance_schedules update <attendance_schedule_id>
+PUT    /clients/{client_id}                                         -> clients update <client_id>
+PUT    /clients/{client_id}/update_metadata                         -> clients update_metadata <client_id>
+PUT    /insights/smart_notification_rules/{rule_id}                 -> insights smart_notification_rules <rule_id>
+PUT    /invites/{invite_id}                                         -> invites update <invite_id>
+PUT    /job_sites/{job_site_id}                                     -> job_sites update <job_site_id>
+PUT    /job_sites/{job_site_id}/add_rules                           -> job_sites add_rules <job_site_id>
+PUT    /job_sites/{job_site_id}/remove_rules                        -> job_sites remove_rules <job_site_id>
+PUT    /job_sites/{job_site_id}/update_rules                        -> job_sites update_rules <job_site_id>
+PUT    /organizations/{organization_id}/global_todos/{id}           -> global_todos update <id>
+PUT    /organizations/{organization_id}/update_members              -> organizations update_members
+PUT    /organizations/{organization_id}/update_metadata             -> organizations update_metadata
+PUT    /projects/{project_id}                                       -> projects update <project_id>
+PUT    /projects/{project_id}/update_members                        -> projects update_members <project_id>
+PUT    /projects/{project_id}/update_metadata                       -> projects update_metadata <project_id>
+PUT    /tasks/{task_id}                                             -> tasks update <task_id>
+PUT    /tasks/{task_id}/update_metadata                             -> tasks update_metadata <task_id>
+PUT    /teams/{team_id}                                             -> teams update <team_id>
+PUT    /teams/{team_id}/update_members                              -> teams update_members <team_id>
+PUT    /teams/{team_id}/update_metadata                             -> teams update_metadata <team_id>
+PUT    /teams/{team_id}/update_projects                             -> teams update_projects <team_id>
+PUT    /time_off_policies/{time_off_policy_id}                      -> time_off_policies update <time_off_policy_id>
+PUT    /time_off_requests/{time_off_request_id}                     -> time_off_requests update <time_off_request_id>
+PUT    /time_off_requests/{time_off_request_id}/status              -> time_off_requests status <time_off_request_id>

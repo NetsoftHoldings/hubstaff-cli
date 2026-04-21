@@ -1,4 +1,6 @@
+use crate::auth::TokenSet;
 use crate::error::CliError;
+use crate::persistence::write_atomic;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -8,33 +10,29 @@ const DEFAULT_AUTH_URL: &str = "https://account.hubstaff.com";
 const DEFAULT_FORMAT: &str = "compact";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct Config {
-    #[serde(default = "default_api_url")]
     pub api_url: String,
-    #[serde(
-        default = "default_auth_url",
-        skip_serializing_if = "is_default_auth_url"
-    )]
+    #[serde(skip_serializing_if = "is_default_auth_url")]
     pub auth_url: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub organization: Option<u64>,
     /// Explicit schema docs URL override. When unset, derived from `api_url`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_url: Option<String>,
-    #[serde(default = "default_format")]
     pub format: String,
-    #[serde(default, skip_serializing_if = "AuthConfig::is_empty")]
+    #[serde(skip_serializing_if = "AuthConfig::is_empty")]
     pub auth: AuthConfig,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            api_url: default_api_url(),
-            auth_url: default_auth_url(),
+            api_url: DEFAULT_API_URL.to_string(),
+            auth_url: DEFAULT_AUTH_URL.to_string(),
             organization: None,
             schema_url: None,
-            format: default_format(),
+            format: DEFAULT_FORMAT.to_string(),
             auth: AuthConfig::default(),
         }
     }
@@ -56,20 +54,8 @@ impl AuthConfig {
     }
 }
 
-fn default_api_url() -> String {
-    DEFAULT_API_URL.to_string()
-}
-
-fn default_auth_url() -> String {
-    DEFAULT_AUTH_URL.to_string()
-}
-
 fn is_default_auth_url(url: &str) -> bool {
     url == DEFAULT_AUTH_URL
-}
-
-fn default_format() -> String {
-    DEFAULT_FORMAT.to_string()
 }
 
 impl Config {
@@ -116,28 +102,29 @@ impl Config {
         Ok(config)
     }
 
-    pub fn save(&self) -> Result<(), CliError> {
+    pub fn ensure_dir() -> Result<PathBuf, CliError> {
         let dir = Self::config_dir();
-        if !dir.exists() {
-            fs::create_dir_all(&dir)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
-            }
-        }
-
-        let path = Self::config_path();
-        let content = toml::to_string_pretty(self)?;
-        fs::write(&path, &content)?;
-
+        fs::create_dir_all(&dir)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
         }
+        Ok(dir)
+    }
 
+    pub fn save(&self) -> Result<(), CliError> {
+        Self::ensure_dir()?;
+        let path = Self::config_path();
+        let content = toml::to_string_pretty(self)?;
+        write_atomic(&path, content.as_bytes())?;
         Ok(())
+    }
+
+    pub fn store_tokens(&mut self, tokens: TokenSet) {
+        self.auth.access_token = Some(tokens.access_token);
+        self.auth.refresh_token = Some(tokens.refresh_token);
+        self.auth.expires_at = tokens.expires_at;
     }
 
     pub fn get_token(&self) -> Option<String> {
@@ -158,6 +145,35 @@ impl Config {
         self.schema_url
             .clone()
             .unwrap_or_else(|| format!("{}/docs", self.api_url.trim_end_matches('/')))
+    }
+
+    pub fn unset(&mut self, key: &str) -> Result<(), CliError> {
+        match key {
+            "organization" => self.organization = None,
+            "schema_url" => self.schema_url = None,
+            "api_url" => self.api_url = DEFAULT_API_URL.to_string(),
+            "auth_url" => self.auth_url = DEFAULT_AUTH_URL.to_string(),
+            "format" => self.format = DEFAULT_FORMAT.to_string(),
+            "token" | "refresh_token" => {
+                return Err(CliError::Config(
+                    "cannot unset auth tokens here; run 'hubstaff logout'".to_string(),
+                ));
+            }
+            _ => {
+                return Err(CliError::Config(format!(
+                    "unknown config key: {key}. Valid keys: organization, api_url, auth_url, schema_url, format"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn reset(&mut self) {
+        let auth = std::mem::take(&mut self.auth);
+        *self = Config {
+            auth,
+            ..Config::default()
+        };
     }
 }
 
@@ -206,6 +222,47 @@ mod tests {
             ..Default::default()
         };
         assert!(!auth.is_empty());
+    }
+
+    #[test]
+    fn store_tokens_overwrites_access_and_refresh() {
+        let mut config = Config {
+            auth: AuthConfig {
+                access_token: Some("old_access".into()),
+                refresh_token: Some("old_refresh".into()),
+                expires_at: Some("2025-01-01T00:00:00Z".into()),
+            },
+            ..Default::default()
+        };
+        config.store_tokens(TokenSet {
+            access_token: "new_access".into(),
+            refresh_token: "new_refresh".into(),
+            expires_at: Some("2030-01-01T00:00:00Z".into()),
+        });
+        assert_eq!(config.auth.access_token.as_deref(), Some("new_access"));
+        assert_eq!(config.auth.refresh_token.as_deref(), Some("new_refresh"));
+        assert_eq!(
+            config.auth.expires_at.as_deref(),
+            Some("2030-01-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn store_tokens_clears_stale_expires_at_when_new_has_none() {
+        let mut config = Config {
+            auth: AuthConfig {
+                access_token: Some("old_access".into()),
+                refresh_token: Some("old_refresh".into()),
+                expires_at: Some("2025-01-01T00:00:00Z".into()),
+            },
+            ..Default::default()
+        };
+        config.store_tokens(TokenSet {
+            access_token: "new_access".into(),
+            refresh_token: "new_refresh".into(),
+            expires_at: None,
+        });
+        assert_eq!(config.auth.expires_at, None);
     }
 
     #[test]

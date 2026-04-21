@@ -34,3 +34,7 @@ install-tools:
     command -v cargo-deny >/dev/null || cargo install cargo-deny --locked
     command -v cargo-audit >/dev/null || cargo install cargo-audit --locked
     command -v cargo-auditable >/dev/null || cargo install cargo-auditable --locked
+
+refresh-schema-fixture:
+    curl -sSf https://api.hubstaff.com/v2/docs -o tests/fixtures/schema.json
+    INSTA_UPDATE=auto cargo test schema_command_table_snapshot -- --nocapture
