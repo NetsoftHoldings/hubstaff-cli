@@ -2,6 +2,7 @@ mod api;
 mod auth;
 mod client;
 mod command_index;
+mod commands_list;
 mod config;
 mod config_commands;
 mod error;
@@ -47,6 +48,12 @@ enum Commands {
         #[command(subcommand)]
         action: SchemaAction,
     },
+    /// Browse the available API commands
+    #[command(name = "commands")]
+    Browse {
+        #[command(subcommand)]
+        action: CommandsAction,
+    },
     #[command(external_subcommand)]
     Dynamic(Vec<String>),
 }
@@ -80,6 +87,12 @@ enum SchemaAction {
     },
     /// Show schema cache status
     Show,
+}
+
+#[derive(Subcommand)]
+enum CommandsAction {
+    /// List every available command grouped by resource
+    List,
 }
 
 fn main() {
@@ -124,6 +137,9 @@ fn run(cli: &Cli) -> Result<(), error::CliError> {
                 }
             }
         }
+        Commands::Browse { action } => match action {
+            CommandsAction::List => commands_list::list(),
+        },
         Commands::Dynamic(args) => {
             let cfg = config::Config::load()?;
             let schema = schema::ApiSchema::load(&cfg)?;

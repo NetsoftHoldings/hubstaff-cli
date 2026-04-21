@@ -128,33 +128,29 @@ impl CommandIndex {
         }
     }
 
-    pub fn sample_usages(&self, limit: usize) -> Vec<String> {
-        let mut usages = self
-            .entries
-            .iter()
-            .map(usage_line)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        usages.truncate(limit);
-        usages
+    pub fn entries(&self) -> &[CommandEntry] {
+        &self.entries
     }
 
     pub fn suggestions(&self, first_word: Option<&str>, limit: usize) -> Vec<String> {
-        let usages = if let Some(word) = first_word {
-            if let Some(indexes) = self.by_first_word.get(word) {
-                indexes
-                    .iter()
-                    .filter_map(|index| self.entries.get(*index))
-                    .map(usage_line)
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect::<Vec<_>>()
-            } else {
-                self.sample_usages(limit)
-            }
+        let usages = if let Some(word) = first_word
+            && let Some(indexes) = self.by_first_word.get(word)
+        {
+            indexes
+                .iter()
+                .filter_map(|index| self.entries.get(*index))
+                .map(usage_line)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
         } else {
-            self.sample_usages(limit)
+            self.entries
+                .iter()
+                .map(usage_line)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .take(limit)
+                .collect::<Vec<_>>()
         };
 
         usages.into_iter().take(limit).collect()

@@ -17,14 +17,14 @@ pub fn run_dynamic(
     let parsed = ParsedInvocation::parse(args)?;
 
     if parsed.positionals.is_empty() {
-        print_global_help(&index);
+        print_global_help();
         return Ok(());
     }
 
     let resolution = index.resolve(&parsed.positionals);
 
     if parsed.help {
-        print_help_for_resolution(schema, &index, &resolution, &parsed.positionals)?;
+        print_help_for_resolution(schema, &resolution, &parsed.positionals)?;
         return Ok(());
     }
 
@@ -401,7 +401,6 @@ fn resolve_error(result: ResolveResult<'_>) -> CliError {
 
 fn print_help_for_resolution(
     schema: &ApiSchema,
-    index: &CommandIndex,
     resolution: &ResolveResult<'_>,
     positionals: &[String],
 ) -> Result<(), CliError> {
@@ -443,7 +442,7 @@ fn print_help_for_resolution(
             }
         }
         ResolveResult::Unknown { suggestions, .. } => {
-            print_global_help(index);
+            print_global_help();
             if !suggestions.is_empty() {
                 println!();
                 println!("Suggestions:");
@@ -455,13 +454,13 @@ fn print_help_for_resolution(
     }
 
     if positionals.is_empty() {
-        print_global_help(index);
+        print_global_help();
     }
 
     Ok(())
 }
 
-fn print_global_help(index: &CommandIndex) {
+fn print_global_help() {
     println!("Schema-driven API command mode");
     println!();
     println!("Usage:");
@@ -474,10 +473,8 @@ fn print_global_help(index: &CommandIndex) {
     println!("  hubstaff teams update_members 123");
     println!("  hubstaff projects list --page_limit 10");
     println!();
-    println!("Schema commands (sample):");
-    for usage in index.sample_usages(20) {
-        println!("  {usage}");
-    }
+    println!("Discover commands:");
+    println!("  hubstaff commands list");
 }
 
 fn print_operation_help(entry: &CommandEntry, operation: &Operation) {
