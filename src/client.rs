@@ -191,7 +191,6 @@ impl HubstaffClient {
                 .unwrap_or("unknown");
             return Err(CliError::Api {
                 status,
-                code: "rate_limited".to_string(),
                 message: format!("rate limited. Retry after {retry_after}s"),
             });
         }
@@ -210,7 +209,6 @@ impl HubstaffClient {
                 };
                 return Err(CliError::Api {
                     status,
-                    code: "non_json_error".to_string(),
                     message: format!("[{status}] {preview}"),
                 });
             }
@@ -218,16 +216,11 @@ impl HubstaffClient {
         };
 
         if status >= 400 {
-            let code = body["code"].as_str().unwrap_or("api_error").to_string();
             let message = body["error"]
                 .as_str()
                 .unwrap_or("unknown API error")
                 .to_string();
-            return Err(CliError::Api {
-                status,
-                code,
-                message,
-            });
+            return Err(CliError::Api { status, message });
         }
 
         Ok(body)
@@ -623,13 +616,8 @@ mod tests {
         let err = get_json(&mut client, "/bad", &HashMap::new()).unwrap_err();
 
         match err {
-            CliError::Api {
-                status,
-                code,
-                message,
-            } => {
+            CliError::Api { status, message } => {
                 assert_eq!(status, 400);
-                assert_eq!(code, "invalid_params");
                 assert_eq!(message, "bad request");
             }
             _ => panic!("expected Api error"),
@@ -667,13 +655,8 @@ mod tests {
         let err = get_json(&mut client, "/limited", &HashMap::new()).unwrap_err();
 
         match err {
-            CliError::Api {
-                status,
-                code,
-                message,
-            } => {
+            CliError::Api { status, message } => {
                 assert_eq!(status, 429);
-                assert_eq!(code, "rate_limited");
                 assert!(message.contains("30"));
             }
             _ => panic!("expected Api error"),
@@ -713,13 +696,8 @@ mod tests {
         let err = get_json(&mut client, "/html-error", &HashMap::new()).unwrap_err();
 
         match err {
-            CliError::Api {
-                status,
-                code,
-                message,
-            } => {
+            CliError::Api { status, message } => {
                 assert_eq!(status, 502);
-                assert_eq!(code, "non_json_error");
                 assert!(message.contains("Bad Gateway"));
             }
             _ => panic!("expected Api error"),

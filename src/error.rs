@@ -3,11 +3,7 @@ use std::process;
 
 #[derive(Debug)]
 pub enum CliError {
-    Api {
-        status: u16,
-        code: String,
-        message: String,
-    },
+    Api { status: u16, message: String },
     Auth(String),
     Config(String),
     Network(String),
@@ -23,26 +19,8 @@ impl CliError {
         }
     }
 
-    pub fn exit(self, json_mode: bool) -> ! {
-        if json_mode {
-            let obj = match &self {
-                CliError::Api { code, message, .. } => {
-                    serde_json::json!({"error": message, "code": code})
-                }
-                CliError::Auth(msg) => {
-                    serde_json::json!({"error": msg, "code": "auth_error"})
-                }
-                CliError::Config(msg) => {
-                    serde_json::json!({"error": msg, "code": "config_error"})
-                }
-                CliError::Network(msg) => {
-                    serde_json::json!({"error": msg, "code": "network_error"})
-                }
-            };
-            eprintln!("{}", serde_json::to_string(&obj).unwrap());
-        } else {
-            eprintln!("error: {self}");
-        }
+    pub fn exit(self) -> ! {
+        eprintln!("error: {self}");
         process::exit(self.exit_code());
     }
 }
@@ -94,7 +72,6 @@ impl From<serde_json::Error> for CliError {
     fn from(err: serde_json::Error) -> Self {
         CliError::Api {
             status: 0,
-            code: "json_parse_error".to_string(),
             message: format!("failed to parse JSON: {err}"),
         }
     }
@@ -109,7 +86,6 @@ mod tests {
         assert_eq!(
             CliError::Api {
                 status: 400,
-                code: "bad".into(),
                 message: "bad request".into()
             }
             .exit_code(),
@@ -124,7 +100,6 @@ mod tests {
     fn display_api_error() {
         let err = CliError::Api {
             status: 404,
-            code: "not_found".into(),
             message: "resource not found".into(),
         };
         assert_eq!(format!("{err}"), "[404] resource not found");
@@ -169,7 +144,7 @@ mod tests {
         let cli_err = CliError::from(json_err);
         assert_eq!(cli_err.exit_code(), 1);
         match cli_err {
-            CliError::Api { code, .. } => assert_eq!(code, "json_parse_error"),
+            CliError::Api { message, .. } => assert!(message.contains("failed to parse JSON")),
             _ => panic!("expected Api error"),
         }
     }

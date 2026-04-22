@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 const DEFAULT_API_URL: &str = "https://api.hubstaff.com/v2";
 const DEFAULT_AUTH_URL: &str = "https://account.hubstaff.com";
-const DEFAULT_FORMAT: &str = "compact";
+const DEFAULT_FORMAT: &str = "json";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -234,7 +234,7 @@ mod tests {
             config.effective_schema_url(),
             "https://api.hubstaff.com/v2/docs"
         );
-        assert_eq!(config.format, "compact");
+        assert_eq!(config.format, "json");
         assert!(config.organization.is_none());
         assert!(config.oauth.is_empty());
         assert!(config.auth.is_empty());

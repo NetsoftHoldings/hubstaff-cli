@@ -128,16 +128,6 @@ fn cli_diagnose_subcommand_is_not_supported() {
 }
 
 #[test]
-fn cli_check_rejects_json_flag() {
-    let xdg = helpers::temp_xdg();
-    let dir = xdg.path().to_str().unwrap();
-
-    let (_, stderr, code) = helpers::run(&["check", "--json"], dir);
-    assert_eq!(code, 3);
-    assert!(stderr.contains("--json is not supported for 'hubstaff check'"));
-}
-
-#[test]
 fn cli_config_set_and_show() {
     let xdg = helpers::temp_xdg();
     let dir = xdg.path().to_str().unwrap();
@@ -152,7 +142,7 @@ fn cli_config_set_and_show() {
     assert_eq!(code, 0);
     assert!(stdout.contains("organization = 42"));
     assert!(stdout.contains("api_url = https://api.hubstaff.com/v2"));
-    assert!(stdout.contains("format = compact"));
+    assert!(stdout.contains("format = json"));
 
     // Set token — should mask
     let (stdout, _, code) = helpers::run(&["config", "set", "token", "secret123"], dir);
@@ -201,7 +191,7 @@ fn cli_config_set_invalid_format() {
 
     let (_, stderr, code) = helpers::run(&["config", "set", "format", "xml"], dir);
     assert_eq!(code, 3);
-    assert!(stderr.contains("compact"));
+    assert!(stderr.contains("'json' or 'pretty'"));
 }
 
 #[test]
@@ -366,7 +356,7 @@ fn cli_config_reset_restores_defaults_and_preserves_auth() {
     assert!(!stdout.contains("auth_url = "));
     assert!(!stdout.contains("organization = "));
     assert!(!stdout.contains("schema_url = "));
-    assert!(stdout.contains("format = compact"));
+    assert!(stdout.contains("format = json"));
     assert!(stdout.contains("access_token = ****"));
 }
 

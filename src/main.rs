@@ -25,12 +25,16 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Output full JSON instead of compact format
-    #[arg(long, global = true)]
+    /// Emit minified single-line JSON (shortcut for `format = "json"`). Overrides the config default.
+    #[arg(long, short = 'j', global = true, conflicts_with = "pretty")]
     json: bool,
 
+    /// Emit pretty-printed, colorized JSON (shortcut for `format = "pretty"`). Overrides the config default.
+    #[arg(long, short = 'p', global = true)]
+    pretty: bool,
+
     /// Override the default organization for this invocation
-    #[arg(long, global = true)]
+    #[arg(long, short = 'o', global = true)]
     organization: Option<u64>,
 }
 
@@ -104,7 +108,7 @@ fn main() {
 
     let result = run(&cli);
     if let Err(e) = result {
-        e.exit(cli.json);
+        e.exit();
     }
 }
 
@@ -139,19 +143,22 @@ fn run(cli: &Cli) -> Result<(), error::CliError> {
             CommandsAction::List => commands_list::list(),
         },
         Commands::Check => {
-            if cli.json {
-                return Err(error::CliError::Config(
-                    "--json is not supported for 'hubstaff check'".to_string(),
-                ));
-            }
             check::run();
             Ok(())
         }
         Commands::Dynamic(args) => {
             let cfg = config::Config::load()?;
+            let effective = if cli.json {
+                "json"
+            } else if cli.pretty {
+                "pretty"
+            } else {
+                cfg.format.as_str()
+            };
+            let pretty = effective == "pretty";
             let schema = schema::ApiSchema::load(&cfg)?;
             let mut client = HubstaffClient::new(cfg)?;
-            api::run_dynamic(&mut client, &schema, args, cli.json, cli.organization)
+            api::run_dynamic(&mut client, &schema, args, pretty, cli.organization)
         }
     }
 }

@@ -85,7 +85,7 @@ pub fn run_dynamic(
     let response = client.request_json(&operation.method, &path, &query_values, body.as_ref())?;
 
     if pretty_json {
-        println!("{}", serde_json::to_string_pretty(&response)?);
+        println!("{}", colored_json::to_colored_json_auto(&response)?);
     } else {
         println!("{}", serde_json::to_string(&response)?);
     }

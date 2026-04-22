@@ -27,9 +27,9 @@ pub fn set(key: &str, value: &str) -> Result<(), CliError> {
             config.auth.expires_at = None;
         }
         "format" => {
-            if value != "compact" && value != "json" {
+            if value != "json" && value != "pretty" {
                 return Err(CliError::Config(
-                    "format must be 'compact' or 'json'".to_string(),
+                    "format must be 'json' or 'pretty'".to_string(),
                 ));
             }
             config.format = value.to_string();
