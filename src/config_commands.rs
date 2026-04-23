@@ -1,6 +1,7 @@
 use crate::auth::TokenSet;
 use crate::config::Config;
 use crate::error::CliError;
+use std::time::Duration;
 
 pub fn set(key: &str, value: &str) -> Result<(), CliError> {
     let mut config = Config::load()?;
@@ -59,7 +60,7 @@ pub fn reset() -> Result<(), CliError> {
     let mut config = Config::load()?;
     config.reset();
     config.save()?;
-    println!("Config reset to defaults. Auth tokens left intact (use 'hubstaff logout' to clear).");
+    println!("Config reset to defaults.");
     Ok(())
 }
 
@@ -68,16 +69,28 @@ pub fn set_pat(pat: &str) -> Result<(), CliError> {
     let config = Config::load()?;
     println!("Exchanging personal access token...");
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(crate::HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|_| CliError::Network("couldn't build HTTP client".to_string()))?;
     let resp = client
-        .post(format!("{}/access_tokens", config.auth_url))
+        .post(format!(
+            "{}/access_tokens",
+            config.auth_url.trim_end_matches('/')
+        ))
         .form(&[("grant_type", "refresh_token"), ("refresh_token", pat)])
         .send()
         .map_err(|e| CliError::Network(format!("token exchange failed: {e}")))?;
 
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
+        let is_transient = resp.status().is_server_error() || status == 429 || status == 408;
         let body = resp.text().unwrap_or_default();
+        if is_transient {
+            return Err(CliError::Network(format!(
+                "personal token exchange unavailable ({status}): {body}"
+            )));
+        }
         return Err(CliError::Auth(format!(
             "personal token exchange failed ({status}): {body}"
         )));
@@ -97,52 +110,6 @@ pub fn set_pat(pat: &str) -> Result<(), CliError> {
     Ok(())
 }
 
-/// Interactive setup for OAuth app credentials. Persists them to `config.toml`.
-pub fn setup_oauth() -> Result<(), CliError> {
-    use std::io::{self, Write};
-
-    println!("Hubstaff OAuth App Setup");
-    println!("========================");
-    println!();
-    println!("1. Go to https://developer.hubstaff.com");
-    println!("2. Navigate to OAuth Apps > Create an app");
-    println!("3. Set redirect URI to: http://127.0.0.1:19876/callback");
-    println!(
-        "   This must match exactly, and port 19876 must be available when you run 'hubstaff login'."
-    );
-    println!("4. Copy the Client ID and Client Secret below.");
-    println!();
-
-    print!("Client ID: ");
-    io::stdout().flush().unwrap();
-    let mut client_id = String::new();
-    io::stdin()
-        .read_line(&mut client_id)
-        .map_err(|e| CliError::Config(format!("failed to read input: {e}")))?;
-    let client_id = client_id.trim();
-
-    if client_id.is_empty() {
-        return Err(CliError::Config("client ID cannot be empty".into()));
-    }
-
-    let client_secret = rpassword::prompt_password("Client Secret: ")
-        .map_err(|e| CliError::Config(format!("failed to read input: {e}")))?;
-    let client_secret = client_secret.trim();
-
-    if client_secret.is_empty() {
-        return Err(CliError::Config("client secret cannot be empty".into()));
-    }
-
-    let mut config = Config::load()?;
-    config.oauth.client_id = Some(client_id.to_string());
-    config.oauth.client_secret = Some(client_secret.to_string());
-    config.save()?;
-
-    println!();
-    println!("You can now run: hubstaff login");
-    Ok(())
-}
-
 pub fn show() -> Result<(), CliError> {
     let config = Config::load()?;
 
@@ -157,18 +124,6 @@ pub fn show() -> Result<(), CliError> {
         println!("schema_url = {schema_url}");
     }
     println!("format = {}", config.format);
-    println!();
-    if config.oauth.is_empty() {
-        println!("[oauth] not configured");
-    } else {
-        println!("[oauth]");
-        if config.oauth.client_id.is_some() {
-            println!("client_id = ****");
-        }
-        if config.oauth.client_secret.is_some() {
-            println!("client_secret = ****");
-        }
-    }
     println!();
     if config.auth.access_token.is_some() {
         println!("[auth]");

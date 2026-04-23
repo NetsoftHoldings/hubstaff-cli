@@ -1,6 +1,4 @@
 /target
-.env
-.env.local
 *.pem
 *.key
 /logs

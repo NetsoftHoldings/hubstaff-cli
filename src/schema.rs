@@ -6,33 +6,15 @@ use reqwest::blocking::Client;
 use reqwest::header::{ETAG, IF_NONE_MATCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::time::Duration as StdDuration;
-
-const DEFAULT_SCHEMA_TIMEOUT_SECS: u64 = 10;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SchemaSource {
-    Live,
-    Cache,
-}
-
-impl SchemaSource {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Live => "live",
-            Self::Cache => "cache",
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct ApiSchema {
     operations: Vec<Operation>,
     by_operation_id: HashMap<String, usize>,
-    source: SchemaSource,
     cache_meta: Option<SchemaCacheMeta>,
 }
 
@@ -100,7 +82,7 @@ impl ApiSchema {
             Err(refresh_err) => {
                 if can_use_cached_fallback
                     && let Some(schema) = cached_schema
-                    && let Ok(parsed) = Self::from_schema(&schema, SchemaSource::Cache, cached_meta)
+                    && let Ok(parsed) = Self::from_schema(&schema, cached_meta)
                 {
                     return Ok(parsed);
                 }
@@ -110,11 +92,10 @@ impl ApiSchema {
     }
 
     pub fn load_cache_only() -> Result<Self, CliError> {
-        let cached = read_cached_schema().ok_or_else(|| {
-            CliError::Config("schema cache is missing; run 'hubstaff schema refresh'".to_string())
-        })?;
+        let cached = read_cached_schema()
+            .ok_or_else(|| CliError::Config("schema cache is missing".to_string()))?;
         let meta = read_cache_meta();
-        Self::from_schema(&cached, SchemaSource::Cache, meta)
+        Self::from_schema(&cached, meta)
     }
 
     pub fn refresh(config: &Config, force: bool) -> Result<Self, CliError> {
@@ -148,7 +129,7 @@ impl ApiSchema {
                     meta.source_url = Some(schema_url);
                 }
                 write_meta(&meta)?;
-                Self::from_schema(&cached, SchemaSource::Cache, Some(meta))
+                Self::from_schema(&cached, Some(meta))
             }
             FetchOutcome::Updated {
                 schema,
@@ -157,13 +138,9 @@ impl ApiSchema {
             } => {
                 write_cache(&schema, etag, &source_url)?;
                 let cache_meta = read_cache_meta();
-                Self::from_schema(&schema, SchemaSource::Live, cache_meta)
+                Self::from_schema(&schema, cache_meta)
             }
         }
-    }
-
-    pub const fn source(&self) -> &SchemaSource {
-        &self.source
     }
 
     pub fn cache_meta_ref(&self) -> Option<&SchemaCacheMeta> {
@@ -188,7 +165,6 @@ impl ApiSchema {
 
     pub(crate) fn from_schema(
         schema: &Value,
-        source: SchemaSource,
         cache_meta: Option<SchemaCacheMeta>,
     ) -> Result<Self, CliError> {
         let paths = schema
@@ -280,7 +256,6 @@ impl ApiSchema {
         Ok(Self {
             operations,
             by_operation_id,
-            source,
             cache_meta,
         })
     }
@@ -525,7 +500,7 @@ fn normalize_path_template(path: &str) -> String {
 
 fn http_client() -> Result<Client, CliError> {
     Client::builder()
-        .timeout(StdDuration::from_secs(DEFAULT_SCHEMA_TIMEOUT_SECS))
+        .timeout(StdDuration::from_secs(crate::HTTP_TIMEOUT_SECS))
         .build()
         .map_err(|e| CliError::Network(format!("failed to create schema HTTP client: {e}")))
 }
@@ -609,16 +584,12 @@ fn write_cache(schema: &Value, etag: Option<String>, source_url: &str) -> Result
 fn hash_schema_json(schema: &Value) -> Result<String, CliError> {
     let bytes = serde_json::to_vec(schema)
         .map_err(|e| CliError::Config(format!("schema hash serialization failed: {e}")))?;
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let mut hex = String::with_capacity(64);
-    {
-        use std::fmt::Write as _;
-        for byte in hasher.finalize() {
-            write!(&mut hex, "{byte:02x}").expect("writing to String should not fail");
-        }
+    let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
+    let mut out = String::with_capacity(64);
+    for byte in digest.as_ref() {
+        write!(&mut out, "{byte:02x}").expect("write to String");
     }
-    Ok(hex)
+    Ok(out)
 }
 
 fn write_meta(meta: &SchemaCacheMeta) -> Result<(), CliError> {

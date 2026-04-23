@@ -24,7 +24,7 @@ pub fn run_dynamic(
     let resolution = index.resolve(&parsed.positionals);
 
     if parsed.help {
-        print_help_for_resolution(schema, &resolution, &parsed.positionals)?;
+        print_help_for_resolution(schema, &index, &resolution, &parsed.positionals)?;
         return Ok(());
     }
 
@@ -401,6 +401,7 @@ fn resolve_error(result: ResolveResult<'_>) -> CliError {
 
 fn print_help_for_resolution(
     schema: &ApiSchema,
+    index: &CommandIndex,
     resolution: &ResolveResult<'_>,
     positionals: &[String],
 ) -> Result<(), CliError> {
@@ -415,6 +416,19 @@ fn print_help_for_resolution(
                     ))
                 })?;
             print_operation_help(command.entry, operation);
+
+            let prefix = command.entry.command_words.clone();
+            if let Some(descendants) = index.descendants(&prefix) {
+                let children = descendants
+                    .into_iter()
+                    .filter(|entry| entry.command_words.len() > prefix.len())
+                    .collect::<Vec<_>>();
+                if !children.is_empty() {
+                    println!();
+                    println!("Subcommands:");
+                    print_subcommand_table(&children, schema);
+                }
+            }
         }
         ResolveResult::ShapeMismatch { candidates, .. } if candidates.len() == 1 => {
             let entry = candidates[0];
@@ -442,6 +456,13 @@ fn print_help_for_resolution(
             }
         }
         ResolveResult::Unknown { suggestions, .. } => {
+            if let Some(descendants) = index.descendants(positionals)
+                && !descendants.is_empty()
+            {
+                print_group_help(positionals, &descendants, schema);
+                return Ok(());
+            }
+
             print_global_help();
             if !suggestions.is_empty() {
                 println!();
@@ -453,11 +474,37 @@ fn print_help_for_resolution(
         }
     }
 
-    if positionals.is_empty() {
-        print_global_help();
-    }
-
     Ok(())
+}
+
+fn print_group_help(prefix: &[String], entries: &[&CommandEntry], schema: &ApiSchema) {
+    let prefix_text = prefix.join(" ");
+    println!("Usage:");
+    println!("  hubstaff {prefix_text} <subcommand> [path_ids...] [query options]");
+    println!();
+    println!("Subcommands:");
+    print_subcommand_table(entries, schema);
+    println!();
+    println!("Use `hubstaff {prefix_text} <subcommand> --help` for per-endpoint flags.");
+}
+
+fn print_subcommand_table(entries: &[&CommandEntry], schema: &ApiSchema) {
+    let rows = entries
+        .iter()
+        .map(|entry| {
+            let summary = schema
+                .operation(&entry.operation_id)
+                .and_then(|operation| operation.summary.clone());
+            (usage_line(entry), summary)
+        })
+        .collect::<Vec<_>>();
+    let width = rows.iter().map(|(usage, _)| usage.len()).max().unwrap_or(0);
+    for (usage, summary) in rows {
+        match summary {
+            Some(text) => println!("  {usage:<width$}  {text}"),
+            None => println!("  {usage}"),
+        }
+    }
 }
 
 fn print_global_help() {
@@ -474,7 +521,7 @@ fn print_global_help() {
     println!("  hubstaff projects list --page_limit 10");
     println!();
     println!("Discover commands:");
-    println!("  hubstaff commands list");
+    println!("  hubstaff list");
 }
 
 fn print_operation_help(entry: &CommandEntry, operation: &Operation) {

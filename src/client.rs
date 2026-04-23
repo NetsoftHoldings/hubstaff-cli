@@ -26,7 +26,7 @@ enum Method {
 impl HubstaffClient {
     pub fn new(config: Config) -> Result<Self, CliError> {
         let http = Client::builder()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(crate::HTTP_TIMEOUT_SECS))
             .build()
             .map_err(|e| CliError::Network(format!("failed to create HTTP client: {e}")))?;
         Ok(Self {
@@ -48,7 +48,8 @@ impl HubstaffClient {
         }
         self.config.get_token().ok_or_else(|| {
             CliError::Auth(
-                "not authenticated. Run 'hubstaff login' or set HUBSTAFF_API_TOKEN".to_string(),
+                "not authenticated. Run 'hubstaff config set-pat <TOKEN>' or set HUBSTAFF_API_TOKEN"
+                    .to_string(),
             )
         })
     }
@@ -169,7 +170,8 @@ impl HubstaffClient {
 
         if retry_status == 401 {
             return Err(CliError::Auth(
-                "session expired. Run 'hubstaff login'".to_string(),
+                "session expired. Run 'hubstaff config set-pat <TOKEN>' to re-authenticate"
+                    .to_string(),
             ));
         }
 
@@ -253,7 +255,7 @@ mod tests {
         env_api_token: Option<String>,
     ) -> Result<HubstaffClient, CliError> {
         let http = Client::builder()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(crate::HTTP_TIMEOUT_SECS))
             .build()
             .map_err(|e| CliError::Network(format!("failed to create HTTP client: {e}")))?;
         Ok(HubstaffClient {
@@ -816,7 +818,7 @@ mod tests {
         let mut config = test_config("http://127.0.0.1:9");
         config.auth.refresh_token = Some("refresh_token".to_string());
         config.auth.expires_at = Some(crate::time::now_secs() + 30);
-        // Force refresh attempt to fail regardless of env by using an unreachable auth endpoint.
+        // Force refresh attempt to fail by using an unreachable auth endpoint.
         config.auth_url = "http://127.0.0.1:9".to_string();
 
         let mut client = test_client(config);
@@ -825,10 +827,7 @@ mod tests {
             CliError::Network(message) => {
                 assert!(message.contains("Couldn't refresh your session right now"));
             }
-            CliError::Config(message) => {
-                assert!(message.contains("OAuth client ID not set"));
-            }
-            _ => panic!("expected proactive refresh error"),
+            _ => panic!("expected proactive refresh network error, got {err:?}"),
         }
     }
 }

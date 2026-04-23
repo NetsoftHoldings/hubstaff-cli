@@ -1,157 +1,13 @@
 use crate::config::Config;
 use crate::error::CliError;
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::RngExt;
-use sha2::{Digest, Sha256};
 use std::time::Duration;
-use url::Url;
 
-const CALLBACK_PORT: u16 = 19876;
-const CALLBACK_REDIRECT_URI: &str = "http://127.0.0.1:19876/callback";
-const CALLBACK_TIMEOUT_SECS: u64 = 120;
-const AUTH_HTTP_TIMEOUT_SECS: u64 = 10;
 const REFRESH_NETWORK_ERROR: &str =
     "Couldn't refresh your session right now. Check your internet connection and try again.";
+const REFRESH_SERVICE_ERROR: &str =
+    "Couldn't refresh your session right now. The auth service is unavailable; retry shortly.";
 const REFRESH_AUTH_ERROR: &str =
-    "Couldn't refresh your session. Please run 'hubstaff login' again.";
-
-fn first_non_blank(
-    primary: Option<String>,
-    fallback: impl FnOnce() -> Option<String>,
-) -> Option<String> {
-    primary
-        .filter(|s| !s.is_empty())
-        .or_else(|| fallback().filter(|s| !s.is_empty()))
-}
-
-fn client_id(config: &Config) -> Result<String, CliError> {
-    first_non_blank(config.oauth.client_id.clone(), || {
-        std::env::var("HUBSTAFF_CLIENT_ID").ok()
-    })
-    .ok_or_else(|| {
-        CliError::Config(
-            "OAuth client ID not set.\n\
-             \n\
-             OAuth login requires a Hubstaff OAuth app. To set up:\n\
-             1. Go to https://developer.hubstaff.com > OAuth Apps > Create\n\
-             2. Set redirect URI to http://127.0.0.1:19876/callback\n\
-             3. Copy the Client ID and Client Secret\n\
-             4. Run:  hubstaff config setup-oauth\n\
-             \n\
-             Or set HUBSTAFF_CLIENT_ID and HUBSTAFF_CLIENT_SECRET env vars.\n\
-             \n\
-             Alternative: skip OAuth and use a personal access token:\n\
-               hubstaff config set-pat YOUR_TOKEN"
-                .into(),
-        )
-    })
-}
-
-fn client_secret(config: &Config) -> Result<String, CliError> {
-    first_non_blank(config.oauth.client_secret.clone(), || {
-        std::env::var("HUBSTAFF_CLIENT_SECRET").ok()
-    })
-    .ok_or_else(|| {
-        CliError::Config(
-            "OAuth client secret not set.\n\
-             Run: hubstaff config setup-oauth\n\
-             Or set the HUBSTAFF_CLIENT_SECRET env var."
-                .into(),
-        )
-    })
-}
-
-pub fn login() -> Result<(), CliError> {
-    let config = Config::load()?;
-    let auth_base = &config.auth_url;
-
-    let id = client_id(&config)?;
-    let secret = client_secret(&config)?;
-
-    let (verifier, challenge) = generate_pkce();
-    let state = generate_state();
-    let server = start_callback_server()?;
-    let redirect_uri = CALLBACK_REDIRECT_URI.to_string();
-
-    let auth_url = build_auth_url(auth_base, &id, &challenge, &redirect_uri, &state)?;
-
-    println!("Opening browser for authentication...");
-    println!("If the browser doesn't open, visit:\n{auth_url}");
-
-    if open::that(&auth_url).is_err() {
-        eprintln!("warning: could not open browser automatically");
-    }
-
-    let code = wait_for_callback(&server, &state)?;
-    let tokens = exchange_code(auth_base, &id, &secret, &code, &verifier, &redirect_uri)?;
-
-    let mut config = Config::load()?;
-    config.store_tokens(tokens);
-    config.save()?;
-
-    println!("Authentication successful. Tokens saved.");
-    Ok(())
-}
-
-pub fn logout() -> Result<(), CliError> {
-    let mut config = Config::load()?;
-    config.auth.access_token = None;
-    config.auth.refresh_token = None;
-    config.auth.expires_at = None;
-    config.save()?;
-    println!("Logged out. Tokens cleared.");
-    Ok(())
-}
-
-pub fn refresh_token(config: &mut Config) -> Result<(), CliError> {
-    if config.has_oauth_app() {
-        let id = client_id(config)?;
-        let secret = client_secret(config)?;
-        do_refresh(config, Some((&id, &secret)))
-    } else {
-        do_refresh(config, None)
-    }
-}
-
-fn do_refresh(config: &mut Config, basic_auth: Option<(&str, &str)>) -> Result<(), CliError> {
-    let auth_base = config.auth_url.clone();
-    let refresh = config
-        .auth
-        .refresh_token
-        .as_ref()
-        .ok_or_else(|| CliError::Auth("session expired. Run 'hubstaff login'".to_string()))?
-        .clone();
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(AUTH_HTTP_TIMEOUT_SECS))
-        .build()
-        .map_err(|_| CliError::Network(REFRESH_NETWORK_ERROR.to_string()))?;
-    let mut req = client
-        .post(format!("{auth_base}/access_tokens"))
-        .form(&[("grant_type", "refresh_token"), ("refresh_token", &refresh)]);
-    if let Some((id, secret)) = basic_auth {
-        req = req.basic_auth(id, Some(secret));
-    }
-    let resp = req
-        .send()
-        .map_err(|_| CliError::Network(REFRESH_NETWORK_ERROR.to_string()))?;
-
-    if !resp.status().is_success() {
-        return Err(CliError::Auth(REFRESH_AUTH_ERROR.to_string()));
-    }
-
-    let body: serde_json::Value = resp
-        .json()
-        .map_err(|_| CliError::Auth(REFRESH_AUTH_ERROR.to_string()))?;
-
-    let tokens =
-        TokenSet::from_json(&body).map_err(|_| CliError::Auth(REFRESH_AUTH_ERROR.to_string()))?;
-    config.store_tokens(tokens);
-    config.save()?;
-
-    Ok(())
-}
+    "Couldn't refresh your session. Please run 'hubstaff config set-pat <TOKEN>' again.";
 
 pub struct TokenSet {
     pub access_token: String,
@@ -180,189 +36,55 @@ impl TokenSet {
     }
 }
 
-fn generate_pkce() -> (String, String) {
-    let mut rng = rand::rng();
-    let verifier_bytes: Vec<u8> = (0..32).map(|_| rng.random::<u8>()).collect();
-    let verifier = URL_SAFE_NO_PAD.encode(&verifier_bytes);
+pub fn refresh_token(config: &mut Config) -> Result<(), CliError> {
+    let auth_base = config.auth_url.trim_end_matches('/').to_string();
+    let refresh = config
+        .auth
+        .refresh_token
+        .as_ref()
+        .ok_or_else(|| {
+            CliError::Auth(
+                "session expired. Run 'hubstaff config set-pat <TOKEN>' to re-authenticate"
+                    .to_string(),
+            )
+        })?
+        .clone();
 
-    let mut hasher = Sha256::new();
-    hasher.update(verifier.as_bytes());
-    let challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
-
-    (verifier, challenge)
-}
-
-fn generate_state() -> String {
-    let mut rng = rand::rng();
-    let state_bytes: Vec<u8> = (0..16).map(|_| rng.random::<u8>()).collect();
-    URL_SAFE_NO_PAD.encode(&state_bytes)
-}
-
-fn generate_nonce() -> String {
-    let mut rng = rand::rng();
-    let nonce_bytes: Vec<u8> = (0..16).map(|_| rng.random::<u8>()).collect();
-    URL_SAFE_NO_PAD.encode(&nonce_bytes)
-}
-
-fn build_auth_url(
-    auth_base: &str,
-    client_id: &str,
-    challenge: &str,
-    redirect_uri: &str,
-    state: &str,
-) -> Result<String, CliError> {
-    let nonce = generate_nonce();
-    let mut url = Url::parse(&format!("{auth_base}/authorizations/new"))
-        .map_err(|e| CliError::Config(format!("invalid auth_url '{auth_base}': {e}")))?;
-    url.query_pairs_mut()
-        .append_pair("response_type", "code")
-        .append_pair("client_id", client_id)
-        .append_pair("redirect_uri", redirect_uri)
-        .append_pair("scope", "openid hubstaff:read hubstaff:write")
-        .append_pair("code_challenge", challenge)
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("state", state)
-        .append_pair("nonce", &nonce);
-    Ok(url.to_string())
-}
-
-fn start_callback_server() -> Result<tiny_http::Server, CliError> {
-    tiny_http::Server::http(format!("127.0.0.1:{CALLBACK_PORT}")).map_err(|_| {
-        CliError::Auth(format!(
-            "could not bind to 127.0.0.1:{CALLBACK_PORT}. Free that port and try again. Your Hubstaff OAuth app redirect URI must be set to {CALLBACK_REDIRECT_URI}"
-        ))
-    })
-}
-
-fn wait_for_callback(server: &tiny_http::Server, expected_state: &str) -> Result<String, CliError> {
-    let timeout = std::time::Duration::from_secs(CALLBACK_TIMEOUT_SECS);
-    let start = std::time::Instant::now();
-
-    loop {
-        if start.elapsed() > timeout {
-            return Err(CliError::Auth(
-                "authentication timed out. Try 'hubstaff login' again".to_string(),
-            ));
-        }
-
-        if let Ok(Some(request)) = server.recv_timeout(std::time::Duration::from_secs(1)) {
-            let url_str = format!("http://localhost{}", request.url());
-            let url = Url::parse(&url_str)
-                .map_err(|e| CliError::Auth(format!("failed to parse callback URL: {e}")))?;
-
-            let code = url
-                .query_pairs()
-                .find(|(k, _)| k == "code")
-                .map(|(_, v)| v.to_string());
-
-            let error = url
-                .query_pairs()
-                .find(|(k, _)| k == "error")
-                .map(|(_, v)| v.to_string());
-
-            if let Some(err) = error {
-                let html = "<html><body><h2>Authentication failed</h2>\
-                            <p>Please try again.</p></body></html>";
-                let response = tiny_http::Response::from_string(html).with_header(
-                    "Content-Type: text/html"
-                        .parse::<tiny_http::Header>()
-                        .unwrap(),
-                );
-                let _ = request.respond(response);
-                return Err(CliError::Auth(format!("authentication denied: {err}")));
-            }
-
-            // Validate state parameter (CSRF protection)
-            let callback_state = url
-                .query_pairs()
-                .find(|(k, _)| k == "state")
-                .map(|(_, v)| v.to_string());
-
-            if callback_state.as_deref() != Some(expected_state) {
-                let html = "<html><body><h2>Authentication failed</h2>\
-                            <p>Invalid state parameter.</p></body></html>";
-                let response = tiny_http::Response::from_string(html).with_header(
-                    "Content-Type: text/html"
-                        .parse::<tiny_http::Header>()
-                        .unwrap(),
-                );
-                let _ = request.respond(response);
-                return Err(CliError::Auth(
-                    "invalid state parameter in callback (possible CSRF)".to_string(),
-                ));
-            }
-
-            if let Some(code) = code {
-                let html = "<html><body><h2>Authentication successful</h2>\
-                            <p>You can close this tab.</p></body></html>";
-                let response = tiny_http::Response::from_string(html).with_header(
-                    "Content-Type: text/html"
-                        .parse::<tiny_http::Header>()
-                        .unwrap(),
-                );
-                let _ = request.respond(response);
-                return Ok(code);
-            }
-
-            // Not the callback we expected, respond with 404
-            let response = tiny_http::Response::from_string("not found")
-                .with_status_code(tiny_http::StatusCode(404));
-            let _ = request.respond(response);
-        }
-    }
-}
-
-fn exchange_code(
-    auth_base: &str,
-    client_id: &str,
-    client_secret: &str,
-    code: &str,
-    verifier: &str,
-    redirect_uri: &str,
-) -> Result<TokenSet, CliError> {
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(crate::HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|_| CliError::Network(REFRESH_NETWORK_ERROR.to_string()))?;
     let resp = client
         .post(format!("{auth_base}/access_tokens"))
-        .basic_auth(client_id, Some(client_secret))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("code_verifier", verifier),
-        ])
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", &refresh)])
         .send()
-        .map_err(|e| CliError::Network(format!("token exchange failed: {e}")))?;
+        .map_err(|_| CliError::Network(REFRESH_NETWORK_ERROR.to_string()))?;
 
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp.text().unwrap_or_default();
-        return Err(CliError::Auth(format!(
-            "token exchange failed ({status}): {body}"
-        )));
+    let status = resp.status();
+    if !status.is_success() {
+        let code = status.as_u16();
+        if status.is_server_error() || code == 429 || code == 408 {
+            return Err(CliError::Network(REFRESH_SERVICE_ERROR.to_string()));
+        }
+        return Err(CliError::Auth(REFRESH_AUTH_ERROR.to_string()));
     }
 
     let body: serde_json::Value = resp
         .json()
-        .map_err(|e| CliError::Auth(format!("failed to parse token response: {e}")))?;
+        .map_err(|_| CliError::Auth(REFRESH_AUTH_ERROR.to_string()))?;
 
-    TokenSet::from_json(&body)
+    let tokens =
+        TokenSet::from_json(&body).map_err(|_| CliError::Auth(REFRESH_AUTH_ERROR.to_string()))?;
+    config.store_tokens(tokens);
+    config.save()?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{AuthConfig, Config};
-
-    fn generate_password() -> String {
-        let mut rng = rand::rng();
-        let chars: Vec<char> =
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
-                .chars()
-                .collect();
-        (0..16)
-            .map(|_| chars[rng.random_range(0..chars.len())])
-            .collect()
-    }
 
     fn refresh_test_config(auth_url: String) -> Config {
         Config {
@@ -377,137 +99,9 @@ mod tests {
     }
 
     #[test]
-    fn pkce_verifier_and_challenge_are_different() {
-        let (verifier, challenge) = generate_pkce();
-        assert_ne!(verifier, challenge);
-    }
-
-    #[test]
-    fn pkce_verifier_is_base64url() {
-        let (verifier, _) = generate_pkce();
-        assert!(!verifier.is_empty());
-        assert!(!verifier.contains('+'));
-        assert!(!verifier.contains('/'));
-        assert!(!verifier.contains('='));
-    }
-
-    #[test]
-    fn pkce_challenge_is_sha256_of_verifier() {
-        let (verifier, challenge) = generate_pkce();
-        let mut hasher = Sha256::new();
-        hasher.update(verifier.as_bytes());
-        let expected = URL_SAFE_NO_PAD.encode(hasher.finalize());
-        assert_eq!(challenge, expected);
-    }
-
-    #[test]
-    fn pkce_generates_unique_pairs() {
-        let (v1, _) = generate_pkce();
-        let (v2, _) = generate_pkce();
-        assert_ne!(v1, v2);
-    }
-
-    #[test]
-    fn state_is_non_empty() {
-        let state = generate_state();
-        assert!(!state.is_empty());
-    }
-
-    #[test]
-    fn state_generates_unique_values() {
-        let s1 = generate_state();
-        let s2 = generate_state();
-        assert_ne!(s1, s2);
-    }
-
-    #[test]
-    fn nonce_is_non_empty() {
-        let nonce = generate_nonce();
-        assert!(!nonce.is_empty());
-    }
-
-    #[test]
-    fn nonce_generates_unique_values() {
-        let n1 = generate_nonce();
-        let n2 = generate_nonce();
-        assert_ne!(n1, n2);
-    }
-
-    #[test]
-    fn auth_url_contains_required_params() {
-        let url = build_auth_url(
-            "https://account.hubstaff.com",
-            "test_client_id",
-            "test_challenge",
-            CALLBACK_REDIRECT_URI,
-            "test_state",
-        )
-        .unwrap();
-        assert!(url.contains("response_type=code"));
-        assert!(url.contains("client_id=test_client_id"));
-        assert!(url.contains("redirect_uri="));
-        assert!(url.contains("scope="));
-        assert!(url.contains("code_challenge=test_challenge"));
-        assert!(url.contains("code_challenge_method=S256"));
-        assert!(url.contains("state=test_state"));
-        assert!(url.contains("nonce="));
-    }
-
-    #[test]
-    fn auth_url_uses_custom_base() {
-        let url = build_auth_url(
-            "https://account.staging.hbstf.co",
-            "test_id",
-            "ch",
-            CALLBACK_REDIRECT_URI,
-            "st",
-        )
-        .unwrap();
-        assert!(url.starts_with("https://account.staging.hbstf.co/authorizations/new"));
-    }
-
-    #[test]
-    fn auth_url_errors_on_malformed_base() {
-        let err =
-            build_auth_url("not a url", "test_id", "ch", CALLBACK_REDIRECT_URI, "st").unwrap_err();
-        assert!(matches!(err, CliError::Config(_)));
-    }
-
-    #[test]
-    fn password_generation_length() {
-        let pw = generate_password();
-        assert_eq!(pw.len(), 16);
-    }
-
-    #[test]
-    fn password_generation_has_valid_chars() {
-        let valid = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%";
-        for _ in 0..10 {
-            let pw = generate_password();
-            for c in pw.chars() {
-                assert!(valid.contains(c), "unexpected char: {c}");
-            }
-        }
-    }
-
-    #[test]
-    fn password_generation_is_random() {
-        let pw1 = generate_password();
-        let pw2 = generate_password();
-        assert_ne!(pw1, pw2);
-    }
-
-    #[test]
-    fn callback_server_binds_to_port() {
-        let result = start_callback_server();
-        assert!(result.is_ok());
-        drop(result.unwrap());
-    }
-
-    #[test]
     fn refresh_token_returns_human_network_error_on_connect_failure() {
         let mut config = refresh_test_config("http://127.0.0.1:9".to_string());
-        let err = do_refresh(&mut config, Some(("id", "secret"))).unwrap_err();
+        let err = refresh_token(&mut config).unwrap_err();
         match err {
             CliError::Network(msg) => assert_eq!(msg, REFRESH_NETWORK_ERROR),
             _ => panic!("expected network error"),
@@ -524,10 +118,78 @@ mod tests {
             .create();
 
         let mut config = refresh_test_config(server.url());
-        let err = do_refresh(&mut config, Some(("id", "secret"))).unwrap_err();
+        let err = refresh_token(&mut config).unwrap_err();
         match err {
             CliError::Auth(msg) => assert_eq!(msg, REFRESH_AUTH_ERROR),
             _ => panic!("expected auth error"),
+        }
+    }
+
+    #[test]
+    fn refresh_token_returns_network_error_on_5xx() {
+        let mut server = mockito::Server::new();
+        let _mock = server
+            .mock("POST", "/access_tokens")
+            .with_status(503)
+            .with_body("gateway down")
+            .create();
+
+        let mut config = refresh_test_config(server.url());
+        let err = refresh_token(&mut config).unwrap_err();
+        match err {
+            CliError::Network(msg) => assert_eq!(msg, REFRESH_SERVICE_ERROR),
+            other => panic!("expected network error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refresh_token_returns_network_error_on_429() {
+        let mut server = mockito::Server::new();
+        let _mock = server
+            .mock("POST", "/access_tokens")
+            .with_status(429)
+            .with_body("slow down")
+            .create();
+
+        let mut config = refresh_test_config(server.url());
+        let err = refresh_token(&mut config).unwrap_err();
+        match err {
+            CliError::Network(msg) => assert_eq!(msg, REFRESH_SERVICE_ERROR),
+            other => panic!("expected network error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refresh_token_returns_network_error_on_408() {
+        let mut server = mockito::Server::new();
+        let _mock = server
+            .mock("POST", "/access_tokens")
+            .with_status(408)
+            .with_body("request timeout")
+            .create();
+
+        let mut config = refresh_test_config(server.url());
+        let err = refresh_token(&mut config).unwrap_err();
+        match err {
+            CliError::Network(msg) => assert_eq!(msg, REFRESH_SERVICE_ERROR),
+            other => panic!("expected network error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refresh_token_keeps_auth_error_on_4xx() {
+        let mut server = mockito::Server::new();
+        let _mock = server
+            .mock("POST", "/access_tokens")
+            .with_status(403)
+            .with_body(r#"{"error":"forbidden"}"#)
+            .create();
+
+        let mut config = refresh_test_config(server.url());
+        let err = refresh_token(&mut config).unwrap_err();
+        match err {
+            CliError::Auth(msg) => assert_eq!(msg, REFRESH_AUTH_ERROR),
+            other => panic!("expected auth error, got {other:?}"),
         }
     }
 
@@ -541,48 +203,11 @@ mod tests {
             .create();
 
         let mut config = refresh_test_config(server.url());
-        let err = do_refresh(&mut config, Some(("id", "secret"))).unwrap_err();
+        let err = refresh_token(&mut config).unwrap_err();
         match err {
             CliError::Auth(msg) => assert_eq!(msg, REFRESH_AUTH_ERROR),
             _ => panic!("expected auth error"),
         }
-    }
-
-    #[test]
-    fn first_non_blank_rejects_blank_primary_with_no_fallback() {
-        assert_eq!(first_non_blank(Some(String::new()), || None), None);
-    }
-
-    #[test]
-    fn first_non_blank_rejects_blank_primary_and_blank_fallback() {
-        assert_eq!(
-            first_non_blank(Some(String::new()), || Some(String::new())),
-            None
-        );
-    }
-
-    #[test]
-    fn first_non_blank_falls_back_when_primary_is_blank() {
-        assert_eq!(
-            first_non_blank(Some(String::new()), || Some("env".to_string())),
-            Some("env".to_string())
-        );
-    }
-
-    #[test]
-    fn first_non_blank_falls_back_when_primary_is_missing() {
-        assert_eq!(
-            first_non_blank(None, || Some("env".to_string())),
-            Some("env".to_string())
-        );
-    }
-
-    #[test]
-    fn first_non_blank_prefers_primary_over_fallback() {
-        assert_eq!(
-            first_non_blank(Some("cfg".to_string()), || Some("env".to_string())),
-            Some("cfg".to_string())
-        );
     }
 
     #[test]
@@ -595,7 +220,7 @@ mod tests {
             .create();
 
         let mut config = refresh_test_config(server.url());
-        let err = do_refresh(&mut config, Some(("id", "secret"))).unwrap_err();
+        let err = refresh_token(&mut config).unwrap_err();
         match err {
             CliError::Auth(msg) => assert_eq!(msg, REFRESH_AUTH_ERROR),
             _ => panic!("expected auth error"),
@@ -603,7 +228,21 @@ mod tests {
     }
 
     #[test]
-    fn refresh_pat_sends_no_authorization_header() {
+    fn refresh_trims_trailing_slash_from_auth_url() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/access_tokens")
+            .with_status(401)
+            .create();
+
+        let mut config = refresh_test_config(format!("{}/", server.url()));
+        let _ = refresh_token(&mut config);
+
+        mock.assert();
+    }
+
+    #[test]
+    fn refresh_sends_no_authorization_header() {
         use mockito::Matcher;
 
         let mut server = mockito::Server::new();
@@ -618,25 +257,7 @@ mod tests {
             .create();
 
         let mut config = refresh_test_config(server.url());
-        let _ = do_refresh(&mut config, None);
-
-        mock.assert();
-    }
-
-    #[test]
-    fn refresh_oauth_sends_basic_auth() {
-        let mut server = mockito::Server::new();
-        let mock = server
-            .mock("POST", "/access_tokens")
-            .match_header(
-                "authorization",
-                mockito::Matcher::Regex("^Basic ".to_string()),
-            )
-            .with_status(401)
-            .create();
-
-        let mut config = refresh_test_config(server.url());
-        let _ = do_refresh(&mut config, Some(("cid", "csec")));
+        let _ = refresh_token(&mut config);
 
         mock.assert();
     }

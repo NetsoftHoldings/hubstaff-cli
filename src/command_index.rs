@@ -3,8 +3,8 @@ use crate::error::CliError;
 use crate::persistence::write_atomic;
 use crate::schema::{ApiSchema, Operation};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs;
 
 const INDEX_VERSION: u32 = 1;
@@ -132,6 +132,21 @@ impl CommandIndex {
         &self.entries
     }
 
+    pub fn descendants(&self, prefix: &[String]) -> Option<Vec<&CommandEntry>> {
+        let mut node = &self.trie;
+        for token in prefix {
+            node = node.children.get(token)?;
+        }
+        let mut indexes = Vec::new();
+        collect_terminals(node, &mut indexes);
+        let mut entries = indexes
+            .into_iter()
+            .filter_map(|index| self.entries.get(index))
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| usage_line(entry));
+        Some(entries)
+    }
+
     pub fn suggestions(&self, first_word: Option<&str>, limit: usize) -> Vec<String> {
         let usages = if let Some(word) = first_word
             && let Some(indexes) = self.by_first_word.get(word)
@@ -197,6 +212,13 @@ impl CommandIndex {
         }
 
         best
+    }
+}
+
+fn collect_terminals(node: &TrieNode, out: &mut Vec<usize>) {
+    out.extend(node.terminals.iter().copied());
+    for child in node.children.values() {
+        collect_terminals(child, out);
     }
 }
 
@@ -370,7 +392,7 @@ fn schema_hash(schema: &ApiSchema) -> String {
         return existing.to_string();
     }
 
-    let mut hasher = Sha256::new();
+    let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
     for operation in schema.operations() {
         hasher.update(operation.id.as_bytes());
         hasher.update(b"\0");
@@ -379,14 +401,12 @@ fn schema_hash(schema: &ApiSchema) -> String {
         hasher.update(operation.path_template.as_bytes());
         hasher.update(b"\0");
     }
-    let mut hex = String::with_capacity(64);
-    {
-        use std::fmt::Write as _;
-        for byte in hasher.finalize() {
-            write!(&mut hex, "{byte:02x}").expect("writing to String should not fail");
-        }
+    let digest = hasher.finish();
+    let mut out = String::with_capacity(64);
+    for byte in digest.as_ref() {
+        write!(&mut out, "{byte:02x}").expect("write to String");
     }
-    hex
+    out
 }
 
 fn read_cache() -> Option<CommandIndexCache> {
@@ -447,13 +467,12 @@ mod tests {
     // on this snapshot is the review surface for command-shape drift.
     #[test]
     fn schema_command_table_snapshot() {
-        use crate::schema::{ApiSchema, SchemaSource};
+        use crate::schema::ApiSchema;
         use serde_json::Value;
 
         let raw = include_str!("../tests/fixtures/schema.json");
         let value: Value = serde_json::from_str(raw).expect("fixture is valid JSON");
-        let schema = ApiSchema::from_schema(&value, SchemaSource::Cache, None)
-            .expect("fixture parses into ApiSchema");
+        let schema = ApiSchema::from_schema(&value, None).expect("fixture parses into ApiSchema");
 
         let entries = build_entries(&schema);
         let mut lines = entries
@@ -544,6 +563,74 @@ mod tests {
             }
             _ => panic!("expected ambiguous result"),
         }
+    }
+
+    #[test]
+    fn descendants_returns_subtree_terminals_for_valid_prefix() {
+        let index = CommandIndex::from_entries(vec![
+            entry(&["activities", "list"], &[], "GET", "listActivities"),
+            entry(&["activities", "daily"], &[], "GET", "listDailyActivities"),
+            entry(
+                &["activities", "daily", "updates"],
+                &[],
+                "GET",
+                "listDailyActivityUpdates",
+            ),
+            entry(&["projects", "list"], &[], "GET", "listProjects"),
+        ]);
+
+        let under_activities = index
+            .descendants(&["activities".to_string()])
+            .expect("activities prefix should be known");
+        let usages = under_activities
+            .iter()
+            .map(|e| usage_line(e))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            usages,
+            vec![
+                "activities daily",
+                "activities daily updates",
+                "activities list"
+            ]
+        );
+
+        let under_daily = index
+            .descendants(&["activities".to_string(), "daily".to_string()])
+            .expect("activities daily prefix should be known");
+        let usages = under_daily
+            .iter()
+            .map(|e| usage_line(e))
+            .collect::<Vec<_>>();
+        assert_eq!(usages, vec!["activities daily", "activities daily updates"]);
+    }
+
+    #[test]
+    fn descendants_returns_none_for_unknown_prefix() {
+        let index = CommandIndex::from_entries(vec![entry(
+            &["projects", "list"],
+            &[],
+            "GET",
+            "listProjects",
+        )]);
+
+        assert!(index.descendants(&["mystery".to_string()]).is_none());
+        assert!(
+            index
+                .descendants(&["projects".to_string(), "bogus".to_string()])
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn descendants_with_empty_prefix_returns_all_entries() {
+        let index = CommandIndex::from_entries(vec![
+            entry(&["projects", "list"], &[], "GET", "listProjects"),
+            entry(&["users", "me"], &[], "GET", "getUsersMe"),
+        ]);
+
+        let all = index.descendants(&[]).expect("empty prefix is valid");
+        assert_eq!(all.len(), 2);
     }
 
     #[test]

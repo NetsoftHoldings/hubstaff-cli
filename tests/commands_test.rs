@@ -54,6 +54,17 @@ mod helpers {
         "responses": {"200": {"description": "ok"}}
       }
     },
+    "/v2/organizations/{organization_id}/projects/{project_id}": {
+      "parameters": [
+        {"name": "organization_id", "in": "path", "required": true, "type": "integer"},
+        {"name": "project_id", "in": "path", "required": true, "type": "integer"}
+      ],
+      "get": {
+        "operationId": "getProject",
+        "summary": "Get a single project",
+        "responses": {"200": {"description": "ok"}}
+      }
+    },
     "/v2/teams/{team_id}/update_members": {
       "parameters": [
         {"name": "team_id", "in": "path", "required": true, "type": "integer"}
@@ -95,10 +106,9 @@ fn cli_help_lists_hardcoded_commands() {
     let xdg = helpers::temp_xdg();
     let (stdout, _, code) = helpers::run(&["--help"], xdg.path().to_str().unwrap());
     assert_eq!(code, 0);
-    for cmd in ["schema", "config", "login", "logout"] {
+    for cmd in ["config", "check", "list"] {
         assert!(stdout.contains(cmd), "missing command: {cmd}");
     }
-    assert!(!stdout.contains("api"));
 }
 
 #[test]
@@ -234,7 +244,7 @@ fn cli_config_explicit_default_schema_url_is_preserved_with_custom_api_url() {
 }
 
 #[test]
-fn cli_config_set_token_clears_oauth_refresh_state() {
+fn cli_config_set_token_clears_refresh_state() {
     let xdg = helpers::temp_xdg();
     let dir = xdg.path().to_str().unwrap();
 
@@ -304,13 +314,27 @@ fn cli_config_unset_organization_clears_option() {
 }
 
 #[test]
-fn cli_config_unset_token_rejected() {
+fn cli_config_unset_token_clears_all_auth_fields() {
     let xdg = helpers::temp_xdg();
     let dir = xdg.path().to_str().unwrap();
 
-    let (_, stderr, code) = helpers::run(&["config", "unset", "token"], dir);
-    assert_eq!(code, 3);
-    assert!(stderr.contains("hubstaff logout"));
+    let cfg_dir = xdg.path().join("hubstaff");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(
+        cfg_dir.join("config.toml"),
+        "[auth]\naccess_token = \"a\"\nrefresh_token = \"r\"\nexpires_at = 4070908800\n",
+    )
+    .unwrap();
+
+    let (stdout, _, code) = helpers::run(&["config", "unset", "token"], dir);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("unset token"));
+
+    let (stdout, _, _) = helpers::run(&["config", "show"], dir);
+    assert!(stdout.contains("[auth] not configured"));
+    assert!(!stdout.contains("access_token"));
+    assert!(!stdout.contains("refresh_token"));
+    assert!(!stdout.contains("expires_at"));
 }
 
 #[test]
@@ -324,7 +348,7 @@ fn cli_config_unset_unknown_key() {
 }
 
 #[test]
-fn cli_config_reset_restores_defaults_and_preserves_auth() {
+fn cli_config_reset_clears_auth_tokens() {
     let xdg = helpers::temp_xdg();
     let dir = xdg.path().to_str().unwrap();
 
@@ -357,21 +381,77 @@ fn cli_config_reset_restores_defaults_and_preserves_auth() {
     assert!(!stdout.contains("organization = "));
     assert!(!stdout.contains("schema_url = "));
     assert!(stdout.contains("format = json"));
-    assert!(stdout.contains("access_token = ****"));
+    assert!(stdout.contains("[auth] not configured"));
+    assert!(!stdout.contains("access_token"));
 }
 
 #[test]
-fn cli_logout_clears_tokens() {
+fn cli_config_set_pat_maps_429_to_network_error() {
     let xdg = helpers::temp_xdg();
     let dir = xdg.path().to_str().unwrap();
 
-    helpers::run(&["config", "set", "token", "mytoken"], dir);
-    let (stdout, _, code) = helpers::run(&["logout"], dir);
-    assert_eq!(code, 0);
-    assert!(stdout.contains("Logged out"));
+    let mut server = mockito::Server::new();
+    let _mock = server
+        .mock("POST", "/access_tokens")
+        .with_status(429)
+        .with_body("slow down")
+        .create();
 
-    let (stdout, _, _) = helpers::run(&["config", "show"], dir);
-    assert!(stdout.contains("not configured"));
+    let (_, _, code) = helpers::run(&["config", "set", "auth_url", &server.url()], dir);
+    assert_eq!(code, 0);
+
+    let (_, stderr, code) = helpers::run(&["config", "set-pat", "fake_pat"], dir);
+    assert_eq!(code, 4, "expected Network exit code, got stderr={stderr}");
+    assert!(
+        stderr.contains("unavailable"),
+        "expected 'unavailable' wording, got: {stderr}"
+    );
+}
+
+#[test]
+fn cli_config_set_pat_maps_408_to_network_error() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    let mut server = mockito::Server::new();
+    let _mock = server
+        .mock("POST", "/access_tokens")
+        .with_status(408)
+        .with_body("request timeout")
+        .create();
+
+    let (_, _, code) = helpers::run(&["config", "set", "auth_url", &server.url()], dir);
+    assert_eq!(code, 0);
+
+    let (_, stderr, code) = helpers::run(&["config", "set-pat", "fake_pat"], dir);
+    assert_eq!(code, 4, "expected Network exit code, got stderr={stderr}");
+    assert!(
+        stderr.contains("unavailable"),
+        "expected 'unavailable' wording, got: {stderr}"
+    );
+}
+
+#[test]
+fn cli_config_set_pat_maps_401_to_auth_error() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    let mut server = mockito::Server::new();
+    let _mock = server
+        .mock("POST", "/access_tokens")
+        .with_status(401)
+        .with_body(r#"{"error":"invalid_grant"}"#)
+        .create();
+
+    let (_, _, code) = helpers::run(&["config", "set", "auth_url", &server.url()], dir);
+    assert_eq!(code, 0);
+
+    let (_, stderr, code) = helpers::run(&["config", "set-pat", "fake_pat"], dir);
+    assert_eq!(code, 2, "expected Auth exit code, got stderr={stderr}");
+    assert!(
+        stderr.contains("failed"),
+        "expected 'failed' wording, got: {stderr}"
+    );
 }
 
 #[test]
@@ -613,22 +693,88 @@ fn dynamic_command_uses_cache_when_source_url_matches_effective_schema_url() {
 }
 
 #[test]
-fn schema_show_is_read_only_for_cache_meta() {
+fn dynamic_group_help_lists_subcommands_with_summaries() {
     let xdg = helpers::temp_xdg();
     let dir = xdg.path().to_str().unwrap();
-    helpers::seed_schema_cache(dir);
+    let schema_source = "http://127.0.0.1:1/docs";
+    helpers::seed_schema_cache_with_source_url(dir, schema_source);
+    let _ = helpers::run(&["config", "set", "schema_url", schema_source], dir);
+    let _ = helpers::run(&["config", "set", "api_url", "http://127.0.0.1:1"], dir);
 
-    let meta_path = xdg
-        .path()
-        .join("hubstaff")
-        .join("schema")
-        .join("v2")
-        .join("meta.toml");
-    let before = std::fs::read_to_string(&meta_path).expect("failed to read meta before show");
-
-    let (_, stderr, code) = helpers::run(&["schema", "show"], dir);
+    let (stdout, stderr, code) = helpers::run(&["projects", "--help"], dir);
     assert_eq!(code, 0, "stderr={stderr}");
 
-    let after = std::fs::read_to_string(&meta_path).expect("failed to read meta after show");
-    assert_eq!(before, after, "schema show should not mutate cache meta");
+    assert!(
+        stdout.contains("hubstaff projects <subcommand>"),
+        "expected group usage banner, got: {stdout}"
+    );
+    assert!(stdout.contains("Subcommands:"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("projects list"),
+        "missing projects list, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("projects get <project_id>"),
+        "missing projects get, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("List organization projects"),
+        "missing summary for list, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Get a single project"),
+        "missing summary for get, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Schema-driven API command mode"),
+        "group help should not fall back to global help banner, got: {stdout}"
+    );
+}
+
+#[test]
+fn dynamic_group_help_falls_back_for_unknown_subword() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+    let schema_source = "http://127.0.0.1:1/docs";
+    helpers::seed_schema_cache_with_source_url(dir, schema_source);
+    let _ = helpers::run(&["config", "set", "schema_url", schema_source], dir);
+    let _ = helpers::run(&["config", "set", "api_url", "http://127.0.0.1:1"], dir);
+
+    let (stdout, stderr, code) = helpers::run(&["projects", "bogus", "--help"], dir);
+    assert_eq!(code, 0, "stderr={stderr}");
+
+    assert!(
+        stdout.contains("Schema-driven API command mode"),
+        "expected global help fallback, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("Suggestions:"),
+        "expected suggestions section, got: {stdout}"
+    );
+}
+
+#[test]
+fn dynamic_operation_help_without_children_omits_subcommands_section() {
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+    let schema_source = "http://127.0.0.1:1/docs";
+    helpers::seed_schema_cache_with_source_url(dir, schema_source);
+    let _ = helpers::run(&["config", "set", "schema_url", schema_source], dir);
+    let _ = helpers::run(&["config", "set", "api_url", "http://127.0.0.1:1"], dir);
+
+    let (stdout, stderr, code) = helpers::run(&["projects", "list", "--help"], dir);
+    assert_eq!(code, 0, "stderr={stderr}");
+
+    assert!(
+        stdout.contains("Command:"),
+        "expected operation help, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("projects list"),
+        "expected usage line, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Subcommands:"),
+        "leaf command should not render Subcommands section, got: {stdout}"
+    );
 }

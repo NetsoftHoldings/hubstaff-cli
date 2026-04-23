@@ -13,18 +13,12 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"
-tiny_http = "0.12"
-open = "5"
 dirs = "6"
-rand = "0.10"
-base64 = "0.22"
-sha2 = "0.11"
-url = "2"
 tempfile = "3"
-rpassword = "7"
 colored_json = "5"
 
 [dev-dependencies]

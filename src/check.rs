@@ -2,7 +2,7 @@ use crate::auth;
 use crate::client::HubstaffClient;
 use crate::config::Config;
 use crate::error::CliError;
-use crate::schema::ApiSchema;
+use crate::schema::{ApiSchema, SchemaCacheMeta};
 use crate::time::now_secs;
 use std::collections::HashMap;
 use std::fs;
@@ -12,8 +12,9 @@ const STALE_SCHEMA_DAYS: u64 = 30;
 const TOKEN_NEAR_EXPIRY_SECS: u64 = 300;
 const SECS_PER_DAY: u64 = 86_400;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Status {
+    #[default]
     Ok,
     Warn,
     Fail,
@@ -31,12 +32,13 @@ impl Status {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Check {
     pub name: &'static str,
     pub status: Status,
     pub detail: Option<String>,
     pub remediation: Option<String>,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -73,7 +75,7 @@ fn collect_checks() -> Vec<Check> {
                 name: "Config file",
                 status: Status::Ok,
                 detail: Some(detail),
-                remediation: None,
+                ..Default::default()
             });
             (cfg, true, None)
         }
@@ -85,6 +87,7 @@ fn collect_checks() -> Vec<Check> {
                 status: Status::Fail,
                 detail: Some(detail.clone()),
                 remediation: Some(format!("fix TOML at {} or delete to reset", path.display())),
+                ..Default::default()
             });
             (Config::default(), false, Some(detail))
         }
@@ -126,7 +129,7 @@ fn collect_checks() -> Vec<Check> {
         checks.push(skipped_due_to_config_load("Organization access", detail));
     }
 
-    record_schema_cache(&mut checks);
+    record_schema_cache(&mut checks, &config);
 
     checks
 }
@@ -136,7 +139,7 @@ fn skipped_due_to_config_load(name: &'static str, config_error: &str) -> Check {
         name,
         status: Status::Skip,
         detail: Some(format!("config failed to load: {config_error}")),
-        remediation: None,
+        ..Default::default()
     }
 }
 
@@ -145,7 +148,7 @@ fn check_cli_version() -> Check {
         name: "CLI version",
         status: Status::Ok,
         detail: Some(format!("hubstaff {}", env!("CARGO_PKG_VERSION"))),
-        remediation: None,
+        ..Default::default()
     }
 }
 
@@ -156,7 +159,7 @@ fn check_config_dir_perms() -> Check {
             name: "Config dir perms",
             status: Status::Skip,
             detail: Some(format!("{} does not exist yet", dir.display())),
-            remediation: None,
+            ..Default::default()
         };
     }
 
@@ -171,7 +174,7 @@ fn check_config_dir_perms() -> Check {
                         name: "Config dir perms",
                         status: Status::Ok,
                         detail: Some(format!("{} (0o{mode:o})", dir.display())),
-                        remediation: None,
+                        ..Default::default()
                     }
                 } else {
                     Check {
@@ -179,6 +182,7 @@ fn check_config_dir_perms() -> Check {
                         status: Status::Warn,
                         detail: Some(format!("{} is 0o{mode:o}, expected 0o700", dir.display())),
                         remediation: Some(format!("chmod 700 {}", dir.display())),
+                        ..Default::default()
                     }
                 }
             }
@@ -186,7 +190,7 @@ fn check_config_dir_perms() -> Check {
                 name: "Config dir perms",
                 status: Status::Warn,
                 detail: Some(format!("stat failed: {e}")),
-                remediation: None,
+                ..Default::default()
             },
         }
     }
@@ -197,7 +201,7 @@ fn check_config_dir_perms() -> Check {
             name: "Config dir perms",
             status: Status::Skip,
             detail: Some("non-unix platform".to_string()),
-            remediation: None,
+            ..Default::default()
         }
     }
 }
@@ -208,59 +212,30 @@ fn check_credentials(config: &Config, env_token_present: bool) -> Check {
             name: "Credentials",
             status: Status::Ok,
             detail: Some("HUBSTAFF_API_TOKEN env var".to_string()),
-            remediation: None,
+            ..Default::default()
         };
     }
 
     let has_stored = config.auth.access_token.is_some() || config.auth.refresh_token.is_some();
-    if !has_stored {
+    if has_stored {
         return Check {
-            name: "Credentials",
-            status: Status::Fail,
-            detail: Some(
-                "no HUBSTAFF_API_TOKEN env var and no stored access/refresh token".to_string(),
-            ),
-            remediation: Some(
-                "run 'hubstaff login', 'hubstaff config set-pat <token>', or set HUBSTAFF_API_TOKEN"
-                    .to_string(),
-            ),
-        };
-    }
-
-    match (
-        config.oauth_client_id_present(),
-        config.oauth_client_secret_present(),
-    ) {
-        (true, true) => Check {
-            name: "Credentials",
-            status: Status::Ok,
-            detail: Some("OAuth session".to_string()),
-            remediation: None,
-        },
-        (false, false) => Check {
             name: "Credentials",
             status: Status::Ok,
             detail: Some("PAT session".to_string()),
-            remediation: None,
-        },
-        (true, false) => Check {
-            name: "Credentials",
-            status: Status::Fail,
-            detail: Some("OAuth creds half-configured: client_secret missing".to_string()),
-            remediation: Some(
-                "run 'hubstaff config setup-oauth', set HUBSTAFF_CLIENT_SECRET, or 'hubstaff config unset client_id' to use PAT"
-                    .to_string(),
-            ),
-        },
-        (false, true) => Check {
-            name: "Credentials",
-            status: Status::Fail,
-            detail: Some("OAuth creds half-configured: client_id missing".to_string()),
-            remediation: Some(
-                "run 'hubstaff config setup-oauth', set HUBSTAFF_CLIENT_ID, or 'hubstaff config unset client_secret' to use PAT"
-                    .to_string(),
-            ),
-        },
+            ..Default::default()
+        };
+    }
+
+    Check {
+        name: "Credentials",
+        status: Status::Fail,
+        detail: Some(
+            "no HUBSTAFF_API_TOKEN env var and no stored access/refresh token".to_string(),
+        ),
+        remediation: Some(
+            "run 'hubstaff config set-pat <TOKEN>' or set HUBSTAFF_API_TOKEN".to_string(),
+        ),
+        ..Default::default()
     }
 }
 
@@ -269,15 +244,15 @@ fn check_env_shadowing(env_token_present: bool, has_stored_access: bool) -> Chec
         Check {
             name: "Env token shadowing",
             status: Status::Warn,
-            detail: Some("HUBSTAFF_API_TOKEN overrides your stored OAuth login".to_string()),
-            remediation: Some("unset HUBSTAFF_API_TOKEN to use the stored login".to_string()),
+            detail: Some("HUBSTAFF_API_TOKEN overrides your stored token".to_string()),
+            remediation: Some("unset HUBSTAFF_API_TOKEN to use the stored token".to_string()),
+            ..Default::default()
         }
     } else {
         Check {
             name: "Env token shadowing",
             status: Status::Ok,
-            detail: None,
-            remediation: None,
+            ..Default::default()
         }
     }
 }
@@ -291,7 +266,7 @@ fn check_token_validity(config: &mut Config, env_token_present: bool, creds_ok: 
             name: "Token validity",
             status: Status::Skip,
             detail: Some("using HUBSTAFF_API_TOKEN (no expiry tracked)".to_string()),
-            remediation: None,
+            ..Default::default()
         };
     }
     if config.auth.access_token.is_none() {
@@ -309,15 +284,14 @@ fn check_token_validity(config: &mut Config, env_token_present: bool, creds_ok: 
             name: "Token validity",
             status: Status::Fail,
             detail: Some("stored token has no expires_at".to_string()),
-            remediation: Some(
-                "run 'hubstaff login' or 'hubstaff config set-pat <token>'".to_string(),
-            ),
+            remediation: Some("run 'hubstaff config set-pat <TOKEN>'".to_string()),
+            ..Default::default()
         },
         ExpiryClassification::Fresh { remaining_secs } => Check {
             name: "Token validity",
             status: Status::Ok,
             detail: Some(format!("{} remaining", format_duration(remaining_secs))),
-            remediation: None,
+            ..Default::default()
         },
         ExpiryClassification::NearExpiry { .. } => {
             if config.auth.refresh_token.is_none() {
@@ -339,7 +313,7 @@ fn token_validity_no_credentials() -> Check {
         name: "Token validity",
         status: Status::Skip,
         detail: Some("no credentials".to_string()),
-        remediation: None,
+        ..Default::default()
     }
 }
 
@@ -348,7 +322,8 @@ fn token_validity_near_expiry_without_refresh() -> Check {
         name: "Token validity",
         status: Status::Warn,
         detail: Some("token near expiry and no refresh_token available".to_string()),
-        remediation: Some("run 'hubstaff login' before token expires".to_string()),
+        remediation: Some("run 'hubstaff config set-pat <TOKEN>' before token expires".to_string()),
+        ..Default::default()
     }
 }
 
@@ -357,7 +332,8 @@ fn token_validity_expired_without_refresh() -> Check {
         name: "Token validity",
         status: Status::Fail,
         detail: Some("token expired and no refresh_token available".to_string()),
-        remediation: Some("run 'hubstaff login'".to_string()),
+        remediation: Some("run 'hubstaff config set-pat <TOKEN>'".to_string()),
+        ..Default::default()
     }
 }
 
@@ -367,14 +343,21 @@ fn token_validity_after_refresh(config: &mut Config, success_detail: &'static st
             name: "Token validity",
             status: Status::Ok,
             detail: Some(success_detail.to_string()),
-            remediation: None,
+            ..Default::default()
         },
-        Err(e) => Check {
-            name: "Token validity",
-            status: Status::Fail,
-            detail: Some(format!("refresh failed: {e}")),
-            remediation: Some("run 'hubstaff login'".to_string()),
-        },
+        Err(e) => {
+            let remediation = match &e {
+                CliError::Network(_) => "auth service unavailable; retry 'hubstaff check' shortly",
+                _ => "run 'hubstaff config set-pat <TOKEN>'",
+            };
+            Check {
+                name: "Token validity",
+                status: Status::Fail,
+                detail: Some(format!("refresh failed: {e}")),
+                remediation: Some(remediation.to_string()),
+                ..Default::default()
+            }
+        }
     }
 }
 
@@ -384,7 +367,7 @@ fn probe_and_record_api(checks: &mut Vec<Check>, creds_ok: bool, config: Config)
             name: "API reachability",
             status: Status::Skip,
             detail: Some("no credentials".to_string()),
-            remediation: None,
+            ..Default::default()
         });
         return false;
     }
@@ -397,16 +380,17 @@ fn probe_and_record_api(checks: &mut Vec<Check>, creds_ok: bool, config: Config)
                 name: "API reachability",
                 status: Status::Ok,
                 detail: Some(format!("{users_me_url} OK in {rtt_ms}ms")),
-                remediation: None,
+                ..Default::default()
             });
             true
         }
         Err(e) => {
             let remediation = match &e {
                 CliError::Network(_) => Some("check internet connection and api_url".to_string()),
-                CliError::Auth(_) => {
-                    Some("run 'hubstaff login' (or check HUBSTAFF_API_TOKEN)".to_string())
-                }
+                CliError::Auth(_) => Some(
+                    "run 'hubstaff config set-pat <TOKEN>' (or check HUBSTAFF_API_TOKEN)"
+                        .to_string(),
+                ),
                 _ => None,
             };
             checks.push(Check {
@@ -414,6 +398,7 @@ fn probe_and_record_api(checks: &mut Vec<Check>, creds_ok: bool, config: Config)
                 status: Status::Fail,
                 detail: Some(e.to_string()),
                 remediation,
+                ..Default::default()
             });
             false
         }
@@ -431,7 +416,7 @@ fn probe_and_record_organization(
             name: "Organization access",
             status: Status::Skip,
             detail: Some("no credentials".to_string()),
-            remediation: None,
+            ..Default::default()
         });
         return;
     }
@@ -440,7 +425,7 @@ fn probe_and_record_organization(
             name: "Organization access",
             status: Status::Skip,
             detail: Some("api unreachable".to_string()),
-            remediation: None,
+            ..Default::default()
         });
         return;
     }
@@ -449,7 +434,7 @@ fn probe_and_record_organization(
             name: "Organization access",
             status: Status::Skip,
             detail: Some("no default organization configured".to_string()),
-            remediation: None,
+            ..Default::default()
         });
         return;
     };
@@ -462,7 +447,7 @@ fn probe_and_record_organization(
             name: "Organization access",
             status: Status::Ok,
             detail: Some(format!("organization {org} reachable")),
-            remediation: None,
+            ..Default::default()
         }),
         Err(e) => checks.push(Check {
             name: "Organization access",
@@ -472,44 +457,36 @@ fn probe_and_record_organization(
                 "verify organization id via 'hubstaff config show' or pass --organization"
                     .to_string(),
             ),
+            ..Default::default()
         }),
     }
 }
 
-fn record_schema_cache(checks: &mut Vec<Check>) -> bool {
+fn record_schema_cache(checks: &mut Vec<Check>, config: &Config) -> bool {
     match ApiSchema::load_cache_only() {
         Ok(schema) => {
             let ops = schema.operations().len();
-            let age_days = schema
-                .cache_meta_ref()
+            let meta = schema.cache_meta_ref();
+            let age_days = meta
                 .and_then(|meta| meta.fetched_at)
                 .map(|fetched| now_secs().saturating_sub(fetched) / SECS_PER_DAY);
-            match age_days {
-                Some(age) if age > STALE_SCHEMA_DAYS => {
-                    checks.push(Check {
-                        name: "Schema cache",
-                        status: Status::Warn,
-                        detail: Some(format!("{ops} operations, fetched {age}d ago")),
-                        remediation: Some("run 'hubstaff schema refresh'".to_string()),
-                    });
-                }
-                Some(age) => {
-                    checks.push(Check {
-                        name: "Schema cache",
-                        status: Status::Ok,
-                        detail: Some(format!("{ops} operations, fetched {age}d ago")),
-                        remediation: None,
-                    });
-                }
-                None => {
-                    checks.push(Check {
-                        name: "Schema cache",
-                        status: Status::Ok,
-                        detail: Some(format!("{ops} operations, age unknown")),
-                        remediation: None,
-                    });
-                }
-            }
+
+            let notes = schema_cache_notes(ops, config, meta);
+            let (status, remediation) = match age_days {
+                Some(age) if age > STALE_SCHEMA_DAYS => (
+                    Status::Warn,
+                    Some("delete the schema cache directory to force refetch".to_string()),
+                ),
+                _ => (Status::Ok, None),
+            };
+
+            checks.push(Check {
+                name: "Schema cache",
+                status,
+                detail: None,
+                remediation,
+                notes,
+            });
             true
         }
         Err(e) => {
@@ -517,11 +494,32 @@ fn record_schema_cache(checks: &mut Vec<Check>) -> bool {
                 name: "Schema cache",
                 status: Status::Fail,
                 detail: Some(e.to_string()),
-                remediation: Some("run 'hubstaff schema refresh'".to_string()),
+                remediation: Some("delete the schema cache directory to force refetch".to_string()),
+                ..Default::default()
             });
             false
         }
     }
+}
+
+fn schema_cache_notes(ops: usize, config: &Config, meta: Option<&SchemaCacheMeta>) -> Vec<String> {
+    let mut notes = Vec::with_capacity(7);
+    notes.push(format!("operations = {ops}"));
+    notes.push(format!("url = {}", config.effective_schema_url()));
+    notes.push(match meta.and_then(|meta| meta.fetched_at) {
+        Some(fetched) => format!("fetched_at = {fetched}"),
+        None => "fetched_at = age unknown".to_string(),
+    });
+    if let Some(etag) = meta.and_then(|meta| meta.etag.as_deref()) {
+        notes.push(format!("etag = {etag}"));
+    }
+    notes.push(format!("docs = {}", Config::schema_docs_path().display()));
+    notes.push(format!("meta = {}", Config::schema_meta_path().display()));
+    notes.push(format!(
+        "index = {}",
+        Config::schema_command_index_path().display()
+    ));
+    notes
 }
 
 // --- pure helpers (unit-testable) ---
@@ -581,6 +579,9 @@ fn emit(checks: &[Check]) {
             && matches!(check.status, Status::Fail | Status::Warn)
         {
             println!("{:<name_width$}  ->  {remediation}", "");
+        }
+        for note in &check.notes {
+            println!("{:<name_width$}        {note}", "");
         }
     }
 
@@ -668,32 +669,27 @@ mod tests {
             Check {
                 name: "a",
                 status: Status::Ok,
-                detail: None,
-                remediation: None,
+                ..Default::default()
             },
             Check {
                 name: "b",
                 status: Status::Warn,
-                detail: None,
-                remediation: None,
+                ..Default::default()
             },
             Check {
                 name: "c",
                 status: Status::Fail,
-                detail: None,
-                remediation: None,
+                ..Default::default()
             },
             Check {
                 name: "d",
                 status: Status::Skip,
-                detail: None,
-                remediation: None,
+                ..Default::default()
             },
             Check {
                 name: "e",
                 status: Status::Ok,
-                detail: None,
-                remediation: None,
+                ..Default::default()
             },
         ];
         let summary = summarize(&checks);
@@ -723,59 +719,11 @@ mod tests {
     }
 
     #[test]
-    fn check_credentials_ok_pat_session_when_no_oauth_creds() {
+    fn check_credentials_ok_pat_session_with_stored_tokens() {
         let config = config_with_tokens();
         let check = check_credentials(&config, false);
         assert_eq!(check.status, Status::Ok);
         assert_eq!(check.detail.as_deref(), Some("PAT session"));
-    }
-
-    #[test]
-    fn check_credentials_ok_oauth_session_when_both_creds_present() {
-        let config = Config {
-            oauth: crate::config::OAuthConfig {
-                client_id: Some("cid".to_string()),
-                client_secret: Some("csec".to_string()),
-            },
-            ..config_with_tokens()
-        };
-        let check = check_credentials(&config, false);
-        assert_eq!(check.status, Status::Ok);
-        assert_eq!(check.detail.as_deref(), Some("OAuth session"));
-    }
-
-    #[test]
-    fn check_credentials_fail_when_only_client_id() {
-        let config = Config {
-            oauth: crate::config::OAuthConfig {
-                client_id: Some("cid".to_string()),
-                client_secret: None,
-            },
-            ..config_with_tokens()
-        };
-        let check = check_credentials(&config, false);
-        assert_eq!(check.status, Status::Fail);
-        assert_eq!(
-            check.detail.as_deref(),
-            Some("OAuth creds half-configured: client_secret missing")
-        );
-    }
-
-    #[test]
-    fn check_credentials_fail_when_only_client_secret() {
-        let config = Config {
-            oauth: crate::config::OAuthConfig {
-                client_id: None,
-                client_secret: Some("csec".to_string()),
-            },
-            ..config_with_tokens()
-        };
-        let check = check_credentials(&config, false);
-        assert_eq!(check.status, Status::Fail);
-        assert_eq!(
-            check.detail.as_deref(),
-            Some("OAuth creds half-configured: client_id missing")
-        );
     }
 
     #[test]
@@ -831,6 +779,38 @@ mod tests {
         assert_eq!(
             check.detail.as_deref(),
             Some("token expired and no refresh_token available")
+        );
+    }
+
+    #[test]
+    fn schema_cache_notes_includes_all_paths_and_ops() {
+        let config = Config::default();
+        let notes = schema_cache_notes(138, &config, None);
+        assert!(notes.iter().any(|n| n == "operations = 138"));
+        assert!(notes.iter().any(|n| n.starts_with("url = ")));
+        assert!(notes.iter().any(|n| n == "fetched_at = age unknown"));
+        assert!(notes.iter().any(|n| n.starts_with("docs = ")));
+        assert!(notes.iter().any(|n| n.starts_with("meta = ")));
+        assert!(notes.iter().any(|n| n.starts_with("index = ")));
+        assert!(!notes.iter().any(|n| n.starts_with("etag = ")));
+    }
+
+    #[test]
+    fn schema_cache_notes_includes_etag_and_fetched_at_timestamp() {
+        let config = Config::default();
+        let fetched = now_secs().saturating_sub(SECS_PER_DAY * 3);
+        let meta = SchemaCacheMeta {
+            etag: Some("W/\"abc\"".to_string()),
+            fetched_at: Some(fetched),
+            schema_hash: None,
+            source_url: None,
+        };
+        let notes = schema_cache_notes(10, &config, Some(&meta));
+        assert!(notes.iter().any(|n| n == "etag = W/\"abc\""));
+        assert!(
+            notes
+                .iter()
+                .any(|n| n == &format!("fetched_at = {fetched}"))
         );
     }
 }
