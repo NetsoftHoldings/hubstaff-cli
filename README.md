@@ -404,4 +404,4 @@ hubstaff foo bar --body-json='--literal'
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+[MIT](./LICENSE).
