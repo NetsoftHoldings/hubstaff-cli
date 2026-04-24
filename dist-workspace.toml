@@ -10,10 +10,7 @@ cargo-dist-version = "0.31.0"
 ci = "github"
 
 # The installers to generate for each app
-installers = ["shell", "powershell", "homebrew"]
-
-# Homebrew tap repository
-tap = "NetsoftHoldings/homebrew-tap"
+installers = ["shell", "powershell"]
 
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = [
@@ -23,9 +20,6 @@ targets = [
   "x86_64-pc-windows-msvc",
   "x86_64-unknown-linux-gnu",
 ]
-
-# Publish jobs to run in CI
-publish-jobs = ["homebrew"]
 
 # Allow manual edits to the generated release.yml (we add --draft to gh release create)
 allow-dirty = ["ci"]

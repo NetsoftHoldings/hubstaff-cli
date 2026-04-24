@@ -2,6 +2,20 @@
 
 `hubstaff` is a command-line interface for the [Hubstaff Public API](https://developer.hubstaff.com/docs/hubstaff_v2). Use it to work with organizations, projects, members, invites, tasks, and activity data directly from your terminal.
 
+## Install
+
+**macOS / Linux**
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/NetsoftHoldings/hubstaff-cli/releases/latest/download/hubstaff-installer.sh | sh
+```
+
+**Windows**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/NetsoftHoldings/hubstaff-cli/releases/latest/download/hubstaff-installer.ps1 | iex"
+```
+
 ## Cheat sheet
 
 ```bash
