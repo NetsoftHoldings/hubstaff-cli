@@ -10,7 +10,13 @@ cargo-dist-version = "0.31.0"
 ci = "github"
 
 # The installers to generate for each app
-installers = ["shell", "powershell"]
+installers = ["shell", "powershell", "homebrew"]
+
+# Homebrew tap to publish the generated formula to
+tap = "NetsoftHoldings/homebrew-tap"
+
+# Publish jobs to enable
+publish-jobs = ["homebrew"]
 
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = [

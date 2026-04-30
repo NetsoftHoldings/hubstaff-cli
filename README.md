@@ -4,7 +4,13 @@
 
 ## Install
 
-**macOS / Linux**
+**Homebrew (macOS / Linux)**
+
+```sh
+brew install netsoftholdings/tap/hubstaff
+```
+
+**Shell installer (macOS / Linux)**
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/NetsoftHoldings/hubstaff-cli/releases/latest/download/hubstaff-installer.sh | sh
