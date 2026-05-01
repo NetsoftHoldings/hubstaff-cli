@@ -11,7 +11,6 @@ const REFRESH_SKEW_SECS: u64 = 120;
 pub struct HubstaffClient {
     config: Config,
     http: Client,
-    env_api_token: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -29,28 +28,12 @@ impl HubstaffClient {
             .timeout(Duration::from_secs(crate::HTTP_TIMEOUT_SECS))
             .build()
             .map_err(|e| CliError::Network(format!("failed to create HTTP client: {e}")))?;
-        Ok(Self {
-            config,
-            http,
-            env_api_token: Self::read_env_api_token(),
-        })
-    }
-
-    fn read_env_api_token() -> Option<String> {
-        std::env::var("HUBSTAFF_API_TOKEN")
-            .ok()
-            .filter(|token| !token.is_empty())
+        Ok(Self { config, http })
     }
 
     fn token(&self) -> Result<String, CliError> {
-        if let Some(token) = &self.env_api_token {
-            return Ok(token.clone());
-        }
         self.config.get_token().ok_or_else(|| {
-            CliError::Auth(
-                "not authenticated. Run 'hubstaff config set-pat <TOKEN>' or set HUBSTAFF_API_TOKEN"
-                    .to_string(),
-            )
+            CliError::Auth("not authenticated. Run 'hubstaff config set-pat <TOKEN>'".to_string())
         })
     }
 
@@ -59,7 +42,7 @@ impl HubstaffClient {
     }
 
     fn should_refresh_proactively(&self, now_secs: u64) -> bool {
-        if self.env_api_token.is_some() || self.config.auth.refresh_token.is_none() {
+        if self.config.auth.refresh_token.is_none() {
             return false;
         }
 
@@ -150,12 +133,6 @@ impl HubstaffClient {
 
         if status != 401 {
             return Ok((resp, status, elapsed));
-        }
-
-        if self.env_api_token.is_some() {
-            return Err(CliError::Auth(
-                "invalid token. Check your HUBSTAFF_API_TOKEN".to_string(),
-            ));
         }
 
         auth::refresh_token(&mut self.config)?;
@@ -250,21 +227,6 @@ fn parse_method(method: &str) -> Result<Method, CliError> {
 mod tests {
     use super::*;
 
-    fn new_with_env_token(
-        config: Config,
-        env_api_token: Option<String>,
-    ) -> Result<HubstaffClient, CliError> {
-        let http = Client::builder()
-            .timeout(Duration::from_secs(crate::HTTP_TIMEOUT_SECS))
-            .build()
-            .map_err(|e| CliError::Network(format!("failed to create HTTP client: {e}")))?;
-        Ok(HubstaffClient {
-            config,
-            http,
-            env_api_token,
-        })
-    }
-
     fn test_config(server_url: &str) -> Config {
         Config {
             api_url: server_url.to_string(),
@@ -277,7 +239,7 @@ mod tests {
     }
 
     fn test_client(config: Config) -> HubstaffClient {
-        new_with_env_token(config, None).unwrap()
+        HubstaffClient::new(config).unwrap()
     }
 
     fn get_json(
@@ -716,27 +678,6 @@ mod tests {
     }
 
     #[test]
-    fn auth_401_with_env_var_token() {
-        let mut server = mockito::Server::new();
-        let _mock = server
-            .mock("GET", "/protected")
-            .with_status(401)
-            .with_body(r#"{"error":"invalid_token"}"#)
-            .create();
-
-        // No config token — only injected env token.
-        let config = Config {
-            api_url: server.url(),
-            ..Default::default()
-        };
-        let mut client = new_with_env_token(config, Some("bad_env_token".to_string())).unwrap();
-        let err = get_json(&mut client, "/protected", &HashMap::new()).unwrap_err();
-
-        // Should tell user to check env var, not try refresh
-        assert_eq!(err.exit_code(), 2);
-    }
-
-    #[test]
     fn resolve_organization_delegates_to_config() {
         let config = Config {
             organization: Some(42),
@@ -763,22 +704,6 @@ mod tests {
         get_json(&mut client, "/test", &HashMap::new()).unwrap();
 
         mock.assert();
-    }
-
-    #[test]
-    fn proactive_refresh_false_with_env_token() {
-        let now = crate::time::now_secs();
-        let config = Config {
-            auth: crate::config::AuthConfig {
-                access_token: Some("test_token".to_string()),
-                refresh_token: Some("refresh_token".to_string()),
-                expires_at: Some(now),
-            },
-            ..Default::default()
-        };
-        let client = new_with_env_token(config, Some("env_api_token".to_string())).unwrap();
-
-        assert!(!client.should_refresh_proactively(now));
     }
 
     #[test]

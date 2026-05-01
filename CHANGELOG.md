@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-01
+
+### Removed
+- **Breaking:** `HUBSTAFF_API_TOKEN` environment variable. Use `hubstaff config
+  set-pat` instead.
+- `Env token shadowing` row from `hubstaff check` (no longer applicable). The
+  diagnostic table is now 8 rows.
+
+### Fixed
+- `hubstaff check` perms remediation now quotes the path, so config dirs
+  containing spaces (e.g. macOS `~/Library/Application Support/hubstaff`) can be
+  copy-pasted directly.
+- `hubstaff check` perms diagnostic prints bare octal (`700` / `755`) instead of `0o700` / `0o755`.
+
 ## [0.3.1] - 2026-04-30
 
 ### Added

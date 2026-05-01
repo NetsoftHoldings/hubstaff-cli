@@ -52,8 +52,9 @@ hubstaff -o 999 projects list
 # Health check (exit 0 = all OK, exit 1 = any FAIL)
 hubstaff check
 
-# Non-interactive / CI
-export HUBSTAFF_API_TOKEN="..."                # takes precedence over stored tokens
+# Non-interactive / CI: scope a config dir per run, then set-pat
+export XDG_CONFIG_HOME=/tmp/hubstaff-$CI_RUN_ID
+hubstaff config set-pat "$HUBSTAFF_PAT"
 hubstaff -j projects list                      # minified JSON, pipeable to jq
 ```
 
@@ -63,16 +64,7 @@ Exit codes: `0` success · `1` API error · `2` auth error · `3` config / usage
 
 ## Authentication
 
-The CLI supports two authentication paths. Only one is used per invocation, with the following precedence:
-
-| Source | Precedence | Auto-refresh | When to use |
-|---|---|---|---|
-| `HUBSTAFF_API_TOKEN` environment variable | Highest | No | CI, automation, ephemeral sessions |
-| Tokens stored by `hubstaff config set-pat` | Used if env var is unset | Yes (120 s skew) | Interactive / developer machines |
-
-If `HUBSTAFF_API_TOKEN` is set and non-empty, stored tokens are ignored entirely. `hubstaff check` surfaces a `WARN` on the **Env token shadowing** check when both sources are configured.
-
-### Interactive: personal access token exchange
+Authenticate once with a personal access token from the [Hubstaff developer portal](https://developer.hubstaff.com); the CLI exchanges it for access + refresh tokens and auto-refreshes from then on.
 
 ```bash
 hubstaff config set-pat YOUR_PERSONAL_ACCESS_TOKEN
@@ -80,14 +72,15 @@ hubstaff config set-pat YOUR_PERSONAL_ACCESS_TOKEN
 
 `set-pat` treats the value as a refresh token and POSTs `grant_type=refresh_token` to `<auth_url>/access_tokens`. The response's `access_token`, `refresh_token`, and `expires_in` are saved to the `[auth]` section of the config file. After this, every API call auto-refreshes the access token when it is within 120 seconds of expiry, and transparently refreshes once on a 401 response.
 
-### Non-interactive: environment variable
+### Non-interactive / CI
+
+CI pipelines should scope a per-run config dir so credentials don't leak between jobs:
 
 ```bash
-export HUBSTAFF_API_TOKEN="your-access-token"
+export XDG_CONFIG_HOME=/tmp/hubstaff-$CI_RUN_ID
+hubstaff config set-pat "$HUBSTAFF_PAT"
 hubstaff users me
 ```
-
-Env-var tokens never auto-refresh. On 401 the CLI exits with `error: invalid token. Check your HUBSTAFF_API_TOKEN` and exit code `2`.
 
 ### Other auth-related config
 
@@ -228,7 +221,7 @@ hubstaff foo bar --body-json='--literal'
 2. Else the OS default (macOS: `~/Library/Application Support`; Linux: `~/.config`; Windows: `%APPDATA%` via `dirs::config_dir()`).
 3. Else `$HOME/.config`.
 
-On Unix, `$CONFIG_DIR/hubstaff` is created with mode `0o700`. `hubstaff check` raises a `WARN` if the mode drifts; fix with `chmod 700 <dir>`.
+On Unix, `$CONFIG_DIR/hubstaff` is created with mode `700`. `hubstaff check` raises a `WARN` if the mode drifts; fix with `chmod 700 <dir>`.
 
 ### Config file format (TOML)
 
@@ -251,7 +244,6 @@ Writes are atomic: the CLI writes to a sibling temp file and renames, so a crash
 
 | Variable | Effect |
 |---|---|
-| `HUBSTAFF_API_TOKEN` | Overrides stored tokens. Must be non-empty to take effect. No auto-refresh. |
 | `XDG_CONFIG_HOME` | Overrides the config base directory. |
 
 ### Output format
@@ -320,13 +312,12 @@ The next command that needs the schema will refetch and rebuild the index.
 |---|---|---|---|---|---|---|
 | 1 | CLI version | always | — | — | — | — |
 | 2 | Config file | file loads (or is absent → defaults used) | — | TOML parse error | — | Fix TOML or delete the file to reset. |
-| 3 | Config dir perms (Unix only) | mode is `0o700` | mode is anything else, or `stat` fails | — | directory does not exist; non-Unix platform | `chmod 700 <dir>` |
-| 4 | Credentials | `HUBSTAFF_API_TOKEN` set **or** stored access/refresh token | — | neither source present | — | `hubstaff config set-pat <TOKEN>` or set `HUBSTAFF_API_TOKEN`. |
-| 5 | Env token shadowing | only one of env / stored is configured (or neither) | both are configured | — | — | Unset one source (usually `unset HUBSTAFF_API_TOKEN`). |
-| 6 | Token validity | token is fresh, or near-expiry with a successful refresh, or expired with a successful refresh | near expiry (within 300 s) **and** no refresh token | lacks `expires_at`; expired without refresh token; or refresh attempt failed | using `HUBSTAFF_API_TOKEN` (no expiry tracked); no credentials | `hubstaff config set-pat <TOKEN>` |
-| 7 | API reachability | `GET <api_url>/users/me` returns 2xx (RTT reported) | — | transport error or auth error | no credentials | Fix connectivity / `api_url`, or re-auth. |
-| 8 | Organization access | `GET /organizations/<org_id>` succeeds | — | request fails | no credentials, API unreachable, or no default organization | Verify the id with `hubstaff config show`, or pass `--organization`. |
-| 9 | Schema cache | cache loads and is ≤ 30 days old | cache loads but `fetched_at` is > 30 days old | cache is missing or fails to load | — | Delete the cache dir to force refetch. |
+| 3 | Config dir perms (Unix only) | mode is `700` | mode is anything else, or `stat` fails | — | directory does not exist; non-Unix platform | `chmod 700 <dir>` |
+| 4 | Credentials | stored access/refresh token present | — | none present | — | `hubstaff config set-pat <TOKEN>` |
+| 5 | Token validity | token is fresh, or near-expiry with a successful refresh, or expired with a successful refresh | near expiry (within 300 s) **and** no refresh token | lacks `expires_at`; expired without refresh token; or refresh attempt failed | no credentials | `hubstaff config set-pat <TOKEN>` |
+| 6 | API reachability | `GET <api_url>/users/me` returns 2xx (RTT reported) | — | transport error or auth error | no credentials | Fix connectivity / `api_url`, or re-auth. |
+| 7 | Organization access | `GET /organizations/<org_id>` succeeds | — | request fails | no credentials, API unreachable, or no default organization | Verify the id with `hubstaff config show`, or pass `--organization`. |
+| 8 | Schema cache | cache loads and is ≤ 30 days old | cache loads but `fetched_at` is > 30 days old | cache is missing or fails to load | — | Delete the cache dir to force refetch. |
 
 Each row prints a `detail` string and, where applicable, a `remediation` hint and a `notes:` block. The Schema cache row always includes notes: `operations`, `url`, `fetched_at`, `etag` (if any), and the three cache file paths.
 
@@ -353,12 +344,10 @@ HTTP timeouts are 40 seconds for API requests, schema fetches, and auth/token re
 
 ### `error: not authenticated. ...`
 
-No `HUBSTAFF_API_TOKEN` env var and no stored tokens.
+No stored tokens.
 
 ```bash
 hubstaff config set-pat YOUR_PERSONAL_ACCESS_TOKEN
-# or for CI
-export HUBSTAFF_API_TOKEN="..."
 ```
 
 ### `error: session expired. Run 'hubstaff config set-pat <TOKEN>' to re-authenticate`

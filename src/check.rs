@@ -67,9 +67,9 @@ fn collect_checks() -> Vec<Check> {
         Ok(cfg) => {
             let path = Config::config_path();
             let detail = if path.exists() {
-                format!("{}", path.display())
+                format!("\"{}\"", path.display())
             } else {
-                format!("{} (not present; using defaults)", path.display())
+                format!("\"{}\" (not present; using defaults)", path.display())
             };
             checks.push(Check {
                 name: "Config file",
@@ -86,7 +86,10 @@ fn collect_checks() -> Vec<Check> {
                 name: "Config file",
                 status: Status::Fail,
                 detail: Some(detail.clone()),
-                remediation: Some(format!("fix TOML at {} or delete to reset", path.display())),
+                remediation: Some(format!(
+                    "fix TOML at \"{}\" or delete to reset",
+                    path.display()
+                )),
                 ..Default::default()
             });
             (Config::default(), false, Some(detail))
@@ -95,26 +98,13 @@ fn collect_checks() -> Vec<Check> {
 
     checks.push(check_config_dir_perms());
 
-    let env_api_token = std::env::var("HUBSTAFF_API_TOKEN")
-        .ok()
-        .filter(|token| !token.is_empty());
-
     if config_ok {
         let has_stored_access = config.auth.access_token.is_some();
         let has_stored_refresh = config.auth.refresh_token.is_some();
-        let has_stored_auth = has_stored_access || has_stored_refresh;
-        let creds_ok = env_api_token.is_some() || has_stored_auth;
+        let creds_ok = has_stored_access || has_stored_refresh;
 
-        checks.push(check_credentials(&config, env_api_token.is_some()));
-        checks.push(check_env_shadowing(
-            env_api_token.is_some(),
-            has_stored_auth,
-        ));
-        checks.push(check_token_validity(
-            &mut config,
-            env_api_token.is_some(),
-            creds_ok,
-        ));
+        checks.push(check_credentials(&config));
+        checks.push(check_token_validity(&mut config, creds_ok));
 
         let api_ok = probe_and_record_api(&mut checks, creds_ok, config.clone());
         probe_and_record_organization(&mut checks, creds_ok, api_ok, config.clone());
@@ -123,7 +113,6 @@ fn collect_checks() -> Vec<Check> {
             .as_deref()
             .unwrap_or("unknown config error");
         checks.push(skipped_due_to_config_load("Credentials", detail));
-        checks.push(skipped_due_to_config_load("Env token shadowing", detail));
         checks.push(skipped_due_to_config_load("Token validity", detail));
         checks.push(skipped_due_to_config_load("API reachability", detail));
         checks.push(skipped_due_to_config_load("Organization access", detail));
@@ -158,7 +147,7 @@ fn check_config_dir_perms() -> Check {
         return Check {
             name: "Config dir perms",
             status: Status::Skip,
-            detail: Some(format!("{} does not exist yet", dir.display())),
+            detail: Some(format!("\"{}\" does not exist yet", dir.display())),
             ..Default::default()
         };
     }
@@ -173,15 +162,15 @@ fn check_config_dir_perms() -> Check {
                     Check {
                         name: "Config dir perms",
                         status: Status::Ok,
-                        detail: Some(format!("{} (0o{mode:o})", dir.display())),
+                        detail: Some(format!("\"{}\" ({mode:o})", dir.display())),
                         ..Default::default()
                     }
                 } else {
                     Check {
                         name: "Config dir perms",
                         status: Status::Warn,
-                        detail: Some(format!("{} is 0o{mode:o}, expected 0o700", dir.display())),
-                        remediation: Some(format!("chmod 700 {}", dir.display())),
+                        detail: Some(format!("\"{}\" is {mode:o}, expected 700", dir.display())),
+                        remediation: Some(format!("chmod 700 \"{}\"", dir.display())),
                         ..Default::default()
                     }
                 }
@@ -206,16 +195,7 @@ fn check_config_dir_perms() -> Check {
     }
 }
 
-fn check_credentials(config: &Config, env_token_present: bool) -> Check {
-    if env_token_present {
-        return Check {
-            name: "Credentials",
-            status: Status::Ok,
-            detail: Some("HUBSTAFF_API_TOKEN env var".to_string()),
-            ..Default::default()
-        };
-    }
-
+fn check_credentials(config: &Config) -> Check {
     let has_stored = config.auth.access_token.is_some() || config.auth.refresh_token.is_some();
     if has_stored {
         return Check {
@@ -229,45 +209,15 @@ fn check_credentials(config: &Config, env_token_present: bool) -> Check {
     Check {
         name: "Credentials",
         status: Status::Fail,
-        detail: Some(
-            "no HUBSTAFF_API_TOKEN env var and no stored access/refresh token".to_string(),
-        ),
-        remediation: Some(
-            "run 'hubstaff config set-pat <TOKEN>' or set HUBSTAFF_API_TOKEN".to_string(),
-        ),
+        detail: Some("no stored access/refresh token".to_string()),
+        remediation: Some("run 'hubstaff config set-pat <TOKEN>'".to_string()),
         ..Default::default()
     }
 }
 
-fn check_env_shadowing(env_token_present: bool, has_stored_access: bool) -> Check {
-    if env_token_present && has_stored_access {
-        Check {
-            name: "Env token shadowing",
-            status: Status::Warn,
-            detail: Some("HUBSTAFF_API_TOKEN overrides your stored token".to_string()),
-            remediation: Some("unset HUBSTAFF_API_TOKEN to use the stored token".to_string()),
-            ..Default::default()
-        }
-    } else {
-        Check {
-            name: "Env token shadowing",
-            status: Status::Ok,
-            ..Default::default()
-        }
-    }
-}
-
-fn check_token_validity(config: &mut Config, env_token_present: bool, creds_ok: bool) -> Check {
+fn check_token_validity(config: &mut Config, creds_ok: bool) -> Check {
     if !creds_ok {
         return token_validity_no_credentials();
-    }
-    if env_token_present {
-        return Check {
-            name: "Token validity",
-            status: Status::Skip,
-            detail: Some("using HUBSTAFF_API_TOKEN (no expiry tracked)".to_string()),
-            ..Default::default()
-        };
     }
     if config.auth.access_token.is_none() {
         if config.auth.refresh_token.is_none() {
@@ -387,10 +337,7 @@ fn probe_and_record_api(checks: &mut Vec<Check>, creds_ok: bool, config: Config)
         Err(e) => {
             let remediation = match &e {
                 CliError::Network(_) => Some("check internet connection and api_url".to_string()),
-                CliError::Auth(_) => Some(
-                    "run 'hubstaff config set-pat <TOKEN>' (or check HUBSTAFF_API_TOKEN)"
-                        .to_string(),
-                ),
+                CliError::Auth(_) => Some("run 'hubstaff config set-pat <TOKEN>'".to_string()),
                 _ => None,
             };
             checks.push(Check {
@@ -513,10 +460,16 @@ fn schema_cache_notes(ops: usize, config: &Config, meta: Option<&SchemaCacheMeta
     if let Some(etag) = meta.and_then(|meta| meta.etag.as_deref()) {
         notes.push(format!("etag = {etag}"));
     }
-    notes.push(format!("docs = {}", Config::schema_docs_path().display()));
-    notes.push(format!("meta = {}", Config::schema_meta_path().display()));
     notes.push(format!(
-        "index = {}",
+        "docs = \"{}\"",
+        Config::schema_docs_path().display()
+    ));
+    notes.push(format!(
+        "meta = \"{}\"",
+        Config::schema_meta_path().display()
+    ));
+    notes.push(format!(
+        "index = \"{}\"",
         Config::schema_command_index_path().display()
     ));
     notes
@@ -711,32 +664,21 @@ mod tests {
     }
 
     #[test]
-    fn check_credentials_ok_env_token_wins() {
-        let config = Config::default();
-        let check = check_credentials(&config, true);
-        assert_eq!(check.status, Status::Ok);
-        assert_eq!(check.detail.as_deref(), Some("HUBSTAFF_API_TOKEN env var"));
-    }
-
-    #[test]
     fn check_credentials_ok_pat_session_with_stored_tokens() {
         let config = config_with_tokens();
-        let check = check_credentials(&config, false);
+        let check = check_credentials(&config);
         assert_eq!(check.status, Status::Ok);
         assert_eq!(check.detail.as_deref(), Some("PAT session"));
     }
 
     #[test]
-    fn check_credentials_fail_without_any_stored_or_env_token() {
+    fn check_credentials_fail_without_stored_tokens() {
         let config = Config::default();
-        let check = check_credentials(&config, false);
+        let check = check_credentials(&config);
         assert_eq!(check.status, Status::Fail);
-        assert!(
-            check
-                .detail
-                .as_deref()
-                .unwrap_or_default()
-                .contains("no stored access/refresh token")
+        assert_eq!(
+            check.detail.as_deref(),
+            Some("no stored access/refresh token")
         );
     }
 
@@ -746,7 +688,7 @@ mod tests {
         config.auth.access_token = Some("access".to_string());
         config.auth.expires_at = None;
 
-        let check = check_token_validity(&mut config, false, true);
+        let check = check_token_validity(&mut config, true);
         assert_eq!(check.status, Status::Fail);
         assert_eq!(
             check.detail.as_deref(),
@@ -760,7 +702,7 @@ mod tests {
         config.auth.access_token = Some("access".to_string());
         config.auth.expires_at = Some(now_secs().saturating_add(120));
 
-        let check = check_token_validity(&mut config, false, true);
+        let check = check_token_validity(&mut config, true);
         assert_eq!(check.status, Status::Warn);
         assert_eq!(
             check.detail.as_deref(),
@@ -774,7 +716,7 @@ mod tests {
         config.auth.access_token = Some("access".to_string());
         config.auth.expires_at = Some(now_secs().saturating_sub(120));
 
-        let check = check_token_validity(&mut config, false, true);
+        let check = check_token_validity(&mut config, true);
         assert_eq!(check.status, Status::Fail);
         assert_eq!(
             check.detail.as_deref(),
@@ -789,9 +731,21 @@ mod tests {
         assert!(notes.iter().any(|n| n == "operations = 138"));
         assert!(notes.iter().any(|n| n.starts_with("url = ")));
         assert!(notes.iter().any(|n| n == "fetched_at = age unknown"));
-        assert!(notes.iter().any(|n| n.starts_with("docs = ")));
-        assert!(notes.iter().any(|n| n.starts_with("meta = ")));
-        assert!(notes.iter().any(|n| n.starts_with("index = ")));
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.starts_with("docs = \"") && n.ends_with('"'))
+        );
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.starts_with("meta = \"") && n.ends_with('"'))
+        );
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.starts_with("index = \"") && n.ends_with('"'))
+        );
         assert!(!notes.iter().any(|n| n.starts_with("etag = ")));
     }
 

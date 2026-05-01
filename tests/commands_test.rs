@@ -15,7 +15,6 @@ mod helpers {
         let mut cmd = std::process::Command::new(cli_bin());
         cmd.args(args);
         cmd.env("XDG_CONFIG_HOME", xdg_dir);
-        cmd.env_remove("HUBSTAFF_API_TOKEN");
         let output = cmd.output().expect("failed to execute CLI");
         (
             String::from_utf8_lossy(&output.stdout).to_string(),
@@ -480,9 +479,28 @@ fn cli_check_skips_config_dependent_checks_when_config_is_invalid() {
         "config file check should surface parse error, got: {config_file}"
     );
 
+    // Paths in `hubstaff check` output are double-quoted so spaces don't run into adjacent tokens.
+    assert!(
+        stdout.contains("fix TOML at \""),
+        "expected quoted path in TOML remediation, got stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("chmod 700 \""),
+        "expected quoted path in chmod remediation, got stdout:\n{stdout}"
+    );
+
+    let perms = find_check_line(&stdout, "Config dir perms");
+    assert!(
+        perms.contains("is 755, expected 700"),
+        "expected bare octal in perms detail, got: {perms}"
+    );
+    assert!(
+        !perms.contains("0o"),
+        "perms detail should not contain Rust octal prefix '0o': {perms}"
+    );
+
     for name in [
         "Credentials",
-        "Env token shadowing",
         "Token validity",
         "API reachability",
         "Organization access",
