@@ -1,6 +1,8 @@
 # Hubstaff CLI
 
-`hubstaff` is a command-line interface for the [Hubstaff Public API](https://developer.hubstaff.com/docs/hubstaff_v2). Use it to work with organizations, projects, members, invites, tasks, and activity data directly from your terminal.
+Hubstaff CLI is a command-line tool for interacting with the [Hubstaff Public API](https://developer.hubstaff.com/docs/hubstaff_v2) from your terminal. Query organization data, manage projects and members, automate workflows, and explore API endpoints without writing custom requests manually.
+
+With minimal setup, developers can access activity data, tasks, organizations, and team information directly from the command line.
 
 ## Install
 
