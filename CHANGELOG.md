@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-07-31
+
+### Added
+- `skills/` — agent skills for this CLI, published as Markdown so customers can contribute their own
+  by PR. First skill is `time-off-sync`, for mirroring time off from an external HR system into
+  Hubstaff. See [`skills/CONTRIBUTING.md`](skills/CONTRIBUTING.md).
+- A test guard asserting every command a skill declares still resolves against the schema fixture,
+  so a change in path-to-command derivation fails CI instead of silently breaking published skills.
+
+### Changed
+- `hubstaff check` now exits `0` instead of `1` when the only problem was a stored token without an
+  `expires_at`. Scripts that gate on the exit code will see previously-failing setups start passing.
+
+### Fixed
+- `Token validity` no longer reports `FAIL` for a long-lived token with no `expires_at`. Raw tokens
+  (`config set token`) and organization access tokens (`hsoat_…`) are non-refreshable by design, so
+  the row failed on a working setup and suggested `config set-pat`, which would have replaced the
+  credential. It is now `WARN`: with no refresh token there is nothing to remediate, and with one the
+  detail explains that proactive refresh is disabled. `check` never refreshes for this row, so it has
+  no side effect on stored credentials.
+
 ## [0.4.0] - 2026-05-01
 
 ### Removed
