@@ -230,13 +230,9 @@ fn check_token_validity(config: &mut Config, creds_ok: bool) -> Check {
     }
 
     match classify_expiry(config.auth.expires_at, now_secs()) {
-        ExpiryClassification::Missing => Check {
-            name: "Token validity",
-            status: Status::Fail,
-            detail: Some("stored token has no expires_at".to_string()),
-            remediation: Some("run 'hubstaff config set-pat <TOKEN>'".to_string()),
-            ..Default::default()
-        },
+        ExpiryClassification::Missing => {
+            token_validity_no_expiry(config.auth.refresh_token.is_some())
+        }
         ExpiryClassification::Fresh { remaining_secs } => Check {
             name: "Token validity",
             status: Status::Ok,
@@ -263,6 +259,50 @@ fn token_validity_no_credentials() -> Check {
         name: "Token validity",
         status: Status::Skip,
         detail: Some("no credentials".to_string()),
+        ..Default::default()
+    }
+}
+
+/// A stored token with no `expires_at` covers two different situations, and the message has to
+/// tell them apart.
+///
+/// Without a refresh token it is a long-lived credential — a raw token from `config set token`, or
+/// an organization access token. Non-refreshable by design, so the missing expiry is expected and
+/// there is nothing to remediate.
+///
+/// *With* a refresh token it is a session that has silently lost proactive refresh: the client only
+/// refreshes ahead of a known expiry, so with none recorded it waits for a 401 and refreshes
+/// reactively. That is worth telling the user about, and `set-pat` genuinely fixes it by
+/// re-exchanging and repopulating the expiry.
+///
+/// Neither case refreshes here. `store_tokens` writes back whatever `expires_at` the auth server
+/// returned, so a server that omits `expires_in` would leave this state unchanged and rotate the
+/// refresh token on *every* `check` — a persistent side effect in a diagnostic command that never
+/// reaches a stable state.
+fn token_validity_no_expiry(has_refresh_token: bool) -> Check {
+    if has_refresh_token {
+        return Check {
+            name: "Token validity",
+            status: Status::Warn,
+            detail: Some(
+                "no expires_at recorded; proactive refresh is disabled until a 401 forces it"
+                    .to_string(),
+            ),
+            remediation: Some(
+                "run 'hubstaff config set-pat <TOKEN>' to restore expiry metadata".to_string(),
+            ),
+            ..Default::default()
+        };
+    }
+
+    Check {
+        name: "Token validity",
+        status: Status::Warn,
+        detail: Some("no expires_at; long-lived token that will not auto-refresh".to_string()),
+        notes: vec![
+            "expected for organization access tokens and raw tokens from 'config set token'"
+                .to_string(),
+        ],
         ..Default::default()
     }
 }
@@ -683,16 +723,50 @@ mod tests {
     }
 
     #[test]
-    fn token_validity_missing_expires_at_is_fail() {
+    fn token_validity_missing_expires_at_without_refresh_token_is_warn() {
         let mut config = Config::default();
         config.auth.access_token = Some("access".to_string());
         config.auth.expires_at = None;
 
         let check = check_token_validity(&mut config, true);
-        assert_eq!(check.status, Status::Fail);
+        assert_eq!(check.status, Status::Warn);
         assert_eq!(
             check.detail.as_deref(),
-            Some("stored token has no expires_at")
+            Some("no expires_at; long-lived token that will not auto-refresh")
+        );
+        assert!(
+            check.remediation.is_none(),
+            "a long-lived token is not broken, so there is nothing to remediate"
+        );
+    }
+
+    #[test]
+    fn token_validity_missing_expires_at_with_refresh_token_does_not_refresh() {
+        // Refreshing here would rotate the refresh token on every `check` for any auth server
+        // that omits `expires_in`, since `store_tokens` writes the absent value straight back.
+        let mut config = Config::default();
+        config.auth.access_token = Some("access".to_string());
+        config.auth.refresh_token = Some("refresh".to_string());
+        config.auth.expires_at = None;
+
+        let check = check_token_validity(&mut config, true);
+        assert_eq!(check.status, Status::Warn);
+        assert_eq!(
+            config.auth.refresh_token.as_deref(),
+            Some("refresh"),
+            "check must not rotate credentials as a side effect"
+        );
+        assert!(
+            check
+                .detail
+                .as_deref()
+                .is_some_and(|d| d.contains("proactive refresh is disabled")),
+            "a session with a refresh token is not a long-lived token; got {:?}",
+            check.detail
+        );
+        assert!(
+            check.remediation.is_some(),
+            "set-pat does fix this case, so offer it"
         );
     }
 

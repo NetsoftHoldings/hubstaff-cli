@@ -562,6 +562,45 @@ fn cli_check_treats_refresh_only_session_as_credentials() {
 }
 
 #[test]
+fn cli_check_warns_instead_of_failing_for_long_lived_token_without_expiry() {
+    // Raw tokens (`config set token`) and organization access tokens (`hsoat_...`) are long-lived
+    // and non-refreshable, so they legitimately have no `expires_at`. Reporting that as FAIL made
+    // `check` exit 1 for a working setup, which breaks any script gating on the exit code.
+    let xdg = helpers::temp_xdg();
+    let dir = xdg.path().to_str().unwrap();
+
+    let cfg_dir = xdg.path().join("hubstaff");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(
+        cfg_dir.join("config.toml"),
+        "api_url = \"http://127.0.0.1:9\"\nauth_url = \"http://127.0.0.1:9\"\n[auth]\naccess_token = \"hsoat_local_only\"\n",
+    )
+    .unwrap();
+
+    let (stdout, stderr, _code) = helpers::run(&["check"], dir);
+
+    let token_validity = stdout
+        .lines()
+        .find(|line| line.starts_with("Token validity"))
+        .unwrap_or_else(|| {
+            panic!("missing Token validity line\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        });
+
+    assert!(
+        token_validity.contains("WARN"),
+        "expected WARN for a long-lived token, got: {token_validity}"
+    );
+    assert!(
+        token_validity.contains("will not auto-refresh"),
+        "expected the detail to explain why, got: {token_validity}"
+    );
+    assert!(
+        !stdout.contains("set-pat <TOKEN>'"),
+        "must not suggest set-pat: it expects a refresh token and would replace a working credential.\nstdout:\n{stdout}"
+    );
+}
+
+#[test]
 fn dynamic_projects_list_uses_schema_mapping() {
     let xdg = helpers::temp_xdg();
     let dir = xdg.path().to_str().unwrap();
