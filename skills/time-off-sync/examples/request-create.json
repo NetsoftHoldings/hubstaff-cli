@@ -1,0 +1,16 @@
+{
+  "user_id": 1001,
+  "time_off_policy_id": 512,
+  "starts_at": "2026-08-06T00:00:00",
+  "stops_at": "2026-08-10T23:59:59",
+  "message": "Vacation (HRIS ref HR-4821)",
+  "all_day": true,
+  "exclude_weekends": true,
+  "time_off_request_days": [
+    { "date": "2026-08-06", "amount_used": 28800 },
+    { "date": "2026-08-07", "amount_used": 28800 },
+    { "date": "2026-08-08", "amount_used": 0 },
+    { "date": "2026-08-09", "amount_used": 0 },
+    { "date": "2026-08-10", "amount_used": 28800 }
+  ]
+}
