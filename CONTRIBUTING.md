@@ -72,6 +72,17 @@ Cache lives under `$XDG_CONFIG_HOME/hubstaff/schema/v2/` (or the OS equivalent).
 | `src/persistence.rs` | atomic file writes (tempfile + rename) |
 | `src/error.rs` | error enum → exit code (1 API, 2 auth, 3 config, 4 network) |
 
+## Agent skills
+
+`skills/` holds Markdown playbooks that teach an AI agent to accomplish a task with this CLI. They
+ship as plain files — no MCP server, no extra credentials. Contributions are welcome; see
+[`skills/CONTRIBUTING.md`](./skills/CONTRIBUTING.md) for the authoring workflow, the verification we
+expect, and the acceptance checklist.
+
+Skills live in this repo rather than in the docs site because their commands are derived from the API
+schema, so CI can assert that every command a skill names still resolves. Hosted elsewhere they would
+rot silently the first time a path changed.
+
 ## Local Development
 
 Toolchain is pinned by `rust-toolchain.toml` (Rust 1.95.0, edition 2024). Install the tooling once:

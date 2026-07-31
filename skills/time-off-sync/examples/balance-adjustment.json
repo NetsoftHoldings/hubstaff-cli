@@ -1,0 +1,11 @@
+{
+  "reason": "HRIS sync run 2026-07-27T02:00Z",
+  "balance_adjustments": [
+    {
+      "time_off_policy_id": 512,
+      "user_ids": [1001, 1002],
+      "amount": 288000,
+      "modify_balance": "replace"
+    }
+  ]
+}
